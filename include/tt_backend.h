@@ -12,10 +12,10 @@ typedef enum ttb_event_id {
   TTB_EVENT_WINDOW_RESIZED,
 
   _amount_ttb_event_ids,
-} ttb_event_id_t;
+} ttb_event_id_e;
 
 typedef struct ttb_event {
-  ttb_event_id_t event_id;
+  ttb_event_id_e event_id;
   void *event_data;
 } ttb_event_t;
 

@@ -93,7 +93,15 @@ int main(int argc, char **argv) {
 
   bool running = args_contains(argc, argv, "r") != -1;
 
-  size_t backend_arg_idx =
+  bool building_static_lib = args_contains(argc, argv, "--static-lib") != -1;
+  bool building_dynamic_lib = args_contains(argc, argv, "--dynamic-lib") != -1;
+
+  if (running && (building_static_lib || building_dynamic_lib)) {
+    fprintf(stderr, "Cannot build the engine as a library while running\n");
+    return 1;
+  }
+
+  int backend_arg_idx =
       args_contains_len(argc, argv, "--backend=", strlen("--backend="));
   char *backend = NULL;
   if (backend_arg_idx != -1) {

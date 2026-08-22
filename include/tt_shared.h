@@ -10,9 +10,15 @@
 #define TT_ASSET_ID_TYPE u64
 #endif
 
+#ifndef TT_PACKET_ID_TYPE
+#define TT_PACKET_ID_TYPE u64
+#endif
+
 typedef TT_ENTITY_TYPE tt_entity_t;
 
 typedef TT_ASSET_ID_TYPE tt_asset_id_t;
+
+typedef TT_PACKET_ID_TYPE tt_packet_id_t;
 
 typedef struct tt_rect {
   i32 x;

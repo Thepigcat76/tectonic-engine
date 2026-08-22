@@ -1,10 +1,7 @@
 #include "../include/tt_backend.h"
 #include "../include/tt_engine.h"
-#include "lilc/alloc.h"
 #include "lilc/array.h"
-#include "lilc/log.h"
 #include "lilc/numbers.h"
-#include "lilc/todo.h"
 #include <stddef.h>
 
 #define MAX_ENTITIES_AMOUNT 4000
@@ -74,17 +71,20 @@ static void system_render(tt_entity_manager_t *entities) {
                                      .y = entity_pos.y,
                                      .width = 16,
                                      .height = 16,
-                                 },.tint_color = color_make(255, 255, 255, 255)},
+                                 },
+                             .tint_color = color_make(255, 255, 255, 255)},
     };
 
     ttb_render(entities->engine.backend, render_cmd);
   }
 }
 
+#define _F(...) {__VA_ARGS__}
+
 #define set_component(entities_ptr, entity, comp, ...)                         \
   do {                                                                         \
     __VA_OPT__((entities_ptr)->comp##s[entity] =                               \
-                   (typeof(*((entities_ptr)->comp##s)))__VA_ARGS__;)           \
+                   (typeof(*((entities_ptr)->comp##s)))_F __VA_ARGS__;)        \
     (entities_ptr)->comp##s[entity].present = true;                            \
   } while (0)
 
@@ -112,16 +112,9 @@ i32 main(i32 argc, char **argv) {
 
   entity_manager.player_handle = player;
 
-  set_component(&entity_manager, player, texture,
-                {
-                    .texture = player_tex,
-                });
+  set_component(&entity_manager, player, texture, (.texture = player_tex));
 
-  set_component(&entity_manager, player, position,
-                {
-                    .x = 400,
-                    .y = 400,
-                });
+  set_component(&entity_manager, player, position, (.x = 400, .y = 400));
 
   bool running = true;
 
