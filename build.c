@@ -125,14 +125,14 @@ int main(int argc, char **argv) {
   walk_dir("build", visit_obj_entry);
 
   // Libraries
-  //cmd_appendf(&cmd, "-l" LIB_LILC);
+  cmd_appendf(&cmd, "-l" LIB_LILC);
 
-  printf("Adding modules\n");
+  //printf("Adding modules\n");
 
   // Modules
-  module_add(str_fmt_temp("%s/coding/c/lilc", home));
+  //module_add(str_fmt_temp("%s/coding/c/lilc", home));
 
-  printf("Done adding modules\n");
+  //printf("Done adding modules\n");
 
   if (backend != NULL && strcmp(backend, "raylib") == 0) {
     cmd_appendf(&cmd, "-l%s", LIB_RAYLIB);
@@ -158,16 +158,30 @@ int main(int argc, char **argv) {
 
   bool debug = args_contains(argc, argv, "-d") != -1;
 
+  int args_arg_idx = args_contains(argc, argv, "--args");
+
   // Run program
   if (running) {
-    if (debug) {
-      systemf("gdb ./" OUT_NAME);
-    } else if (args_contains(argc, argv, "-vg") != -1) {
-      systemf("valgrind --leak-check=full --show-leak-kinds=all "
-              "--track-origins=yes --errors-for-leak-kinds=all ./%s",
-              OUT_NAME);
-    } else {
-      systemf("./" OUT_NAME);
+    char args[1024] = {'\0'};
+
+    if (args_arg_idx != -1 && args_arg_idx + 1 < argc) {
+      for (int i = args_arg_idx + 1; i < argc; i++) {
+        strcat(args, argv[i]);
+        if (i + 1 < argc) {
+          strcat(args, " ");
+        }
+      }
     }
+
+    char exec_cmd[1024];
+    sprintf(exec_cmd, "./%s", OUT_NAME);
+
+    if (debug) {
+      sprintf(exec_cmd, "gdb --args ./%s", OUT_NAME);
+    } else if (args_contains(argc, argv, "-vg") != -1) {
+      sprintf(exec_cmd, "valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --errors-for-leak-kinds=all ./%s", OUT_NAME);
+    }
+
+    return WEXITSTATUS(systemf("%s %s", exec_cmd, args));
   }
 }

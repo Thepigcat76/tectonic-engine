@@ -11,7 +11,11 @@
 #endif
 
 #ifndef TT_PACKET_ID_TYPE
-#define TT_PACKET_ID_TYPE u64
+#define TT_PACKET_ID_TYPE i64
+#endif
+
+#ifndef TT_SUBPROC_ID_TYPE
+#define TT_SUBPROC_ID_TYPE u64
 #endif
 
 typedef TT_ENTITY_TYPE tt_entity_t;
@@ -19,6 +23,8 @@ typedef TT_ENTITY_TYPE tt_entity_t;
 typedef TT_ASSET_ID_TYPE tt_asset_id_t;
 
 typedef TT_PACKET_ID_TYPE tt_packet_id_t;
+
+typedef TT_SUBPROC_ID_TYPE tt_subproc_id_t;
 
 typedef struct tt_rect {
   i32 x;
@@ -35,3 +41,7 @@ typedef enum tt_asset_category {
 } tt_asset_category_t;
 
 typedef struct tt_asset_manager tt_asset_manager_t;
+
+typedef struct tt_entity_manager tt_entity_manager_t;
+
+void tt_wait(i32 millis);
