@@ -93,63 +93,89 @@ bool ttec_connect(tt_engine_client_t *engine, const char *ipaddr, u32 port) {
 
   pthread_rwlock_wrlock(&engine->client_connection.connection_rwlock);
   engine->client_connection.server_addr = server_addr;
+  engine->client_connection.state = TT_CLIENT_CONNECTED;
   pthread_rwlock_unlock(&engine->client_connection.connection_rwlock);
-
-  pthread_mutex_lock(&engine->client_connection.connected_mutex);
-  engine->client_connection.connected = true;
-  pthread_cond_signal(&engine->client_connection.connected_cond);
-  pthread_mutex_unlock(&engine->client_connection.connected_mutex);
 
   return false;
 }
 
-static void ttec_packet_recv(tt_client_connection_t *connection, addr_t server_addr, tt_packet_t *packet) {
+extern bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,
+                                tt_byte_buf_t *packet_queue,
+                                pthread_mutex_t *packet_queue_mutex,
+                                tt_packet_t *out_packet,
+                                allocator_t *packet_alloc, void *decode_ctx);
+
+bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
+                     void *decode_ctx) {
+  return tt_packet_queue_pop(&engine->client_connection.packet_infos,
+                             engine->client_connection.packet_data_queue,
+                             &engine->client_connection.packet_queue_mutex,
+                             packet, &engine->client_connection.packet_alloc,
+                             decode_ctx);
+}
+
+static void ttec_packet_recv(tt_client_connection_t *connection,
+                             addr_t server_addr, tt_packet_t *packet) {
   packet->packet_id = -1;
 }
 
+void ttec_client_stop(tt_engine_client_t *engine) {
+  pthread_rwlock_wrlock(&engine->client_connection.connection_rwlock);
+  engine->client_connection.state = TT_CLIENT_STOPPED;
+  pthread_rwlock_unlock(&engine->client_connection.connection_rwlock);
+  log_info("Stopped client");
+}
+
 static void *ttec_packet_receiver_run(void *arg) {
-  tt_engine_client_t *engine_client = arg;
-  tt_client_connection_t *connection = &engine_client->client_connection;
+  tt_client_connection_t *connection =
+      &((tt_engine_client_t *)arg)->client_connection;
 
   addr_t server_addr = -1;
+  tt_client_state_e client_state = TT_CLIENT_RUNNING;
 
-  bool running = true;
-  pthread_rwlock_rdlock(&connection->connection_rwlock);
-  {
-    running = connection->client_running;
-    bool connected = false;
-    while (!connected && connection->client_running) {
-      pthread_mutex_lock(&connection->connected_mutex);
-      log_info("Waiting for server connection...");
-      pthread_cond_wait(&connection->connected_cond, &connection->connected_mutex);
-      connected = connection->connected;
-      pthread_mutex_unlock(&connection->connected_mutex);
-    }
-
-    server_addr = connection->server_addr;
-  }
-  pthread_rwlock_unlock(&connection->connection_rwlock);
-
-  // Listen for packets
-  while (running) {
-    log_debug("Listening for packets");
-    tt_packet_t packet = {0};
-    log_debug("Packet ptr: %p", packet.payload);
-    ttec_packet_recv(connection, server_addr, &packet);
-    log_debug("Packet: %zu", packet.packet_id);
-
-    if (packet.packet_id == -1) {
-      perror("Error packet on client");
-      exit(1);
-    }
-
+  while (client_state == TT_CLIENT_RUNNING ||
+         client_state == TT_CLIENT_CONNECTED) {
     pthread_rwlock_rdlock(&connection->connection_rwlock);
-    {
-      log_debug("Adding packet to queue");
-      deque_push_back(connection->packet_queue, packet);
-      running = connection->client_running;
-    }
+    client_state = connection->state;
     pthread_rwlock_unlock(&connection->connection_rwlock);
+
+    switch (client_state) {
+    case TT_CLIENT_CONNECTED: {
+      if (server_addr == -1) {
+        pthread_rwlock_rdlock(&connection->connection_rwlock);
+        server_addr = connection->server_addr;
+        pthread_rwlock_unlock(&connection->connection_rwlock);
+      }
+
+      // do stuff ...
+      // TODO: Decode on main thread
+      log_debug("Listening for packets");
+      tt_packet_t packet = {0};
+      log_debug("Packet ptr: %p", packet.payload);
+      ttec_packet_recv(connection, server_addr, &packet);
+      log_debug("Packet: %zu", packet.packet_id);
+
+      if (packet.packet_id == -1) {
+        perror("Error packet on client");
+        exit(1);
+      }
+
+      // pthread_rwlock_rdlock(&connection->connection_rwlock);
+      //{
+      log_debug("Adding packet to queue");
+      // deque_push_back(connection->packet_data_queue, packet);
+      //}
+      // pthread_rwlock_unlock(&connection->connection_rwlock);
+    } break;
+    case TT_CLIENT_STOPPED: {
+      server_addr = -1;
+    } break;
+    case TT_CLIENT_RUNNING:
+    default: {
+      server_addr = -1;
+      tt_wait(100);
+    } break;
+    }
   }
 
   return NULL;

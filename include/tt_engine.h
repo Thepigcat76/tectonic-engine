@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lilc/alloc.h"
+#include "lilc/array.h"
 #include "lilc/bump.h"
 #include "lilsockets.h"
 #include "tt_assets.h"
@@ -21,13 +22,13 @@ typedef struct tt_subproc_info {
 // -- NETWORKING --
 
 void tt_packet_send_client(tt_engine_server_t *srvr_engine, addr_t client_addr,
-                           tt_packet_t packet);
+                           tt_packet_t packet, void *encode_ctx);
 
 void tt_packet_send_all_clients(tt_engine_server_t *srvr_engine,
-                                tt_packet_t packet);
+                                tt_packet_t packet, void *encode_ctx);
 
 void tt_packet_send_server(tt_engine_client_t *client_engine,
-                           tt_packet_t packet);
+                           tt_packet_t packet, void *encode_ctx);
 
 typedef struct tt_client_desc {
   u64 client_id;
@@ -37,10 +38,15 @@ typedef struct tt_client_desc {
 typedef struct tt_server tt_server_t;
 
 typedef enum tt_server_state {
-  TT_SERVER_RUNNING, // Server is running but not yet hosten and open
+  TT_SERVER_RUNNING, // Server is running but not yet hosted and open
   TT_SERVER_OPEN,    // Server is running and open to accept clients
   TT_SERVER_STOPPED, // Server has been stopped.
 } tt_server_state_e;
+
+typedef struct {
+  array_t(tt_packet_info_t) infos;
+  bool locked;
+} tt_packet_info_array_t;
 
 #ifndef _CUSTOM_SERVER_IMPL
 struct tt_server {
@@ -51,14 +57,14 @@ struct tt_server {
 
   tt_server_state_e state;
 
-  bool server_running;
-
   bool integrated;
 
   tt_client_desc_t *connected_clients;
 
-  tt_packet_t *packet_queue;
+  tt_byte_buf_t *packet_data_queue;
   pthread_mutex_t packet_queue_mutex;
+  
+  tt_packet_info_array_t packet_infos;
 
   bump_t packet_bump;
   allocator_t packet_alloc;
@@ -71,24 +77,35 @@ void tt_server_deinit(tt_server_t *server);
 
 typedef struct tt_client_connection tt_client_connection_t;
 
+typedef enum tt_client_state {
+  TT_CLIENT_RUNNING,   // Client is running but not yet connected to a server
+  TT_CLIENT_CONNECTED, // Client is running and connected to a server
+  TT_CLIENT_STOPPED,   // Client has been stopped.
+} tt_client_state_e;
+
 #ifndef _CUSTOM_CLIENT_CONNECTION_IMPL
 struct tt_client_connection {
   addr_t server_addr;
-  bool connected;
-  pthread_cond_t connected_cond;
-  pthread_mutex_t connected_mutex;
 
   pthread_rwlock_t connection_rwlock;
 
-  bool client_running;
+  tt_client_state_e state;
 
-  tt_packet_t *packet_queue;
+  tt_byte_buf_t *packet_data_queue;
   pthread_mutex_t packet_queue_mutex;
+  
+  tt_packet_info_array_t packet_infos;
 
   bump_t packet_bump;
   allocator_t packet_alloc;
 };
 #endif
+
+void tt_packet_info_add(tt_packet_info_array_t *packet_infos, tt_packet_info_t packet_info);
+
+void tt_packet_info_lock(tt_packet_info_array_t *packet_infos);
+
+void tt_client_connection_init(tt_client_connection_t *client_connection);
 
 // -- ENGINE --
 
@@ -133,6 +150,13 @@ bool ttec_update(tt_engine_client_t *engine);
 
 bool ttec_connect(tt_engine_client_t *engine, const char *ipaddr, u32 port);
 
+void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet, tt_packet_handle_t packet_handle, void *payload);
+
+bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
+                     void *decode_ctx);
+
+void ttec_client_stop(tt_engine_client_t *engine);
+
 // -- CLIENT-ENGINE-SUBPROCESSES --
 
 bool ttec_subproc_start(tt_engine_client_t *engine, ttec_subprocess_e subproc);
@@ -162,6 +186,11 @@ void ttes_init(tt_engine_server_t *engine, bool integrated);
 void ttes_deinit(tt_engine_server_t *engine);
 
 bool ttes_update(tt_engine_server_t *engine);
+
+void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet, tt_packet_handle_t packet_handle, void *payload);
+
+bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
+                     void *decode_ctx);
 
 bool ttes_server_host(tt_engine_server_t *engine, const char *ipaddr, u32 port);
 

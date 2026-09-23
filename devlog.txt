@@ -1,0 +1,24 @@
+# Initial Devlog - Setting up basic infrastructure
+
+I started this project off, by writing a lot of the api and basic stuff  like a backend system and implementation in raylib along with some basic assets and events.
+
+## The premise
+
+I wanted to create an engine that is extremely simple to use and that allows you to create multiplayer games in a systems language like C without you having to touch stuff like threads and socket libraries.
+
+Since its supposed to be a full on game engine, it should also be able to handle things like assets, events and rendering cleanly, out of the box.
+
+## The networking approach
+
+While making the game multiplayer is optional, it is recommended to implement the game with separate client and server processes, to cleanly handle game logic and support future multiplayer.
+
+The client and server process use separate engine data but do share a backend (In the future, the backend might be subject to splitting or at least ifdef guarding so you dont have to compile libraries like raylib on the server).
+
+The main game logic, depending on your implementation can be shared obviously. Communication between sides happens using packets. When creating a packet one can either automatically serialize the packet struct by describing its layout or provide custom functions for encoding and decoding the data.
+
+## Implementing the game
+
+The actual game logic is mostly up to the user, whether you use an ECS, a more traditional entity approach or something completely different does not matter. To interact between the described processes, the user has to implement handling for packets in their game loop on both the server and the client.
+
+
+

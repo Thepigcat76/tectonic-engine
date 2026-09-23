@@ -71,4 +71,6 @@ void ttb_asset_unload(tt_backend_t *backend, Allocator *asset_alloc, tt_asset_ca
 
 bool ttb_window_should_close(tt_backend_t *backend);
 
-void ttb_events_poll(tt_backend_t *backend, ttb_event_array_t *events);
+void ttb_events_poll(tt_backend_t *backend);
+
+bool ttb_event_pop(tt_backend_t *backend, ttb_event_t *event);
