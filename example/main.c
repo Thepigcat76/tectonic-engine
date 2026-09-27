@@ -241,7 +241,8 @@ static void client_setup(tt_entity_manager_t *entity_manager) {
   move_forward_key =
       tt_keymap_bind_key(&entity_manager->keymap, "Move Forward", TTB_KEY_W);
 
-  tt_keymap_save(&entity_manager->keymap, "keys.toml");
+  tt_keymap_load(&entity_manager->keymap, "keys.toml", true, &HEAP_ALLOCATOR);
+  tt_keymap_save(&entity_manager->keymap, "keys.toml", true);
 
   if (!ttec_subproc_start(&entity_manager->cengine, TTEC_SUBPROC_PACKET_RECV)) {
     log_error("Failed to start packet receiver on the client");

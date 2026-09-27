@@ -1,1 +1,1 @@
-"Move Forward" = {default = "keyboard_key_w", selected = "keyboard_key_w"}
+"Move Forward" = {default = "keyboard_key_null", selected = "keyboard_key_w"}

@@ -5,6 +5,7 @@
 #include "lilc/deque.h"
 #include "tt_shared.h"
 #include <stdbool.h>
+#include <strings.h>
 
 typedef struct tt_backend tt_backend_t;
 
@@ -25,6 +26,7 @@ typedef enum ttb_key_state {
 
 typedef enum {
 #define TTB_MOUSE_ITER(_F)                                                     \
+  _F(TTB_MOUSE_BUTTON_NULL)                                                    \
   _F(TTB_MOUSE_BUTTON_LEFT)                                                    \
   _F(TTB_MOUSE_BUTTON_RIGHT)                                                   \
   _F(TTB_MOUSE_BUTTON_MIDDLE)
@@ -170,21 +172,51 @@ typedef enum ttb_keyboard_key {
 
       _amount_ttb_keys,
 #undef ENUM_ITEM
-} ttb_keyboard_key_t;
+} ttb_keyboard_key_e;
 
-static char *ttb_key_to_string(ttb_keyboard_key_t key) {
-  static char *str_lits[_amount_ttb_keys] = {
+static ttb_keyboard_key_e ttb_key_from_str(const char *key_str) {
+#define STR_CASE(name)                                                         \
+  if (strcasecmp(key_str, #name) == 0)                                              \
+    return name;
+  TTB_KEYBOARD_ITER(STR_CASE)
+#undef STR_CASE
+
+  return TTB_KEY_NULL;
+}
+
+static ttb_mouse_button_e ttb_mouse_btn_from_str(const char *key_str) {
+#define STR_CASE(name)                                                         \
+  if (strcasecmp(key_str, #name))                                              \
+    return name;
+  TTB_MOUSE_ITER(STR_CASE)
+#undef STR_CASE
+
+  return TTB_MOUSE_BUTTON_NULL;
+}
+
+static char *ttb_mouse_btn_to_string(ttb_mouse_button_e key) {
+  static char *mouse_str_lits[_amount_ttb_mouse_btns] = {
+#define STR_LIT(name) #name,
+      TTB_MOUSE_ITER(STR_LIT)
+#undef STR_LIT
+  };
+
+  return mouse_str_lits[key];
+}
+
+static char *ttb_key_to_string(ttb_keyboard_key_e key) {
+  static char *key_str_lits[_amount_ttb_keys] = {
 #define STR_LIT(name) #name,
       TTB_KEYBOARD_ITER(STR_LIT)
 #undef STR_LIT
   };
 
-  return str_lits[key];
+  return key_str_lits[key];
 }
 
 typedef struct ttb_event_keyboard_input {
   ttb_key_state_t key_state;
-  ttb_keyboard_key_t key;
+  ttb_keyboard_key_e key;
 } ttb_event_keyboard_input_t;
 
 typedef struct ttb_event {
@@ -245,7 +277,7 @@ typedef union ttb_render_cmd_data ttb_render_cmd_data_t;
 
 void ttb_render(tt_backend_t *backend, ttb_render_cmd_t render_cmd);
 
-bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_t key);
+bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key);
 
 bool ttb_mouse_down(tt_backend_t *backend, ttb_mouse_button_e btn);
 

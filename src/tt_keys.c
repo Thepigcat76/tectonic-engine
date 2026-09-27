@@ -2,6 +2,8 @@
 #include "../include/tt_engine.h"
 #include "../vendor/toml.h"
 #include "lilc/alloc.h"
+#include "lilc/dynstr.h"
+#include "lilc/file.h"
 #include "lilc/log.h"
 #include "lilc/panic.h"
 #include "lilc/str.h"
@@ -13,27 +15,25 @@ void tt_keymap_init(tt_keymap_t *keymap, allocator_t *alloc) {
 
 void tt_keymap_deinit(tt_keymap_t *keymap) { array_free(keymap->entries); }
 
-void tt_keymap_load(tt_keymap_t *keymap, const char *filepath) {
-  panic("Unimplemented");
-}
-
-static bool tt_toml_write_key(toml_datum_t *tab, char *key, tt_button_kind_e kind,
-                              ttb_mouse_button_e mouse,
-                              ttb_keyboard_key_t keyboard, bump_t *bump, const char **errbuf) {
+static bool tt_toml_write_key(toml_datum_t *tab, char *key,
+                              tt_button_kind_e kind, ttb_mouse_button_e mouse,
+                              ttb_keyboard_key_e keyboard, bump_t *bump,
+                              const char **errbuf) {
   toml_datum_t *key_entry = toml_tab_emplace(tab, key, errbuf);
   if (key_entry == NULL) {
     return false;
   }
   char *keybuf = bump_alloc(bump, 512);
   if (kind == TT_BUTTON_KEYBOARD) {
-    char *tmp = str_fmt_temp("%s", ttb_key_to_string(keyboard) + 4);
-    log_debug("tmp: %s", tmp);
-    for (usz i = 0; i < strlen(tmp); i++) {
-      tmp[i] = tolower(tmp[i]);
+    sprintf(keybuf, "keyboard_%s", ttb_key_to_string(keyboard) + 4);
+    for (usz i = 0; i < strlen(keybuf); i++) {
+      keybuf[i] = tolower(keybuf[i]);
     }
-    sprintf(keybuf, "keyboard_%s", tmp);
-  } else {
-
+  } else if (kind == TT_BUTTON_MOUSE) {
+    sprintf(keybuf, "mouse_%s", ttb_mouse_btn_to_string(mouse) + 4);
+    for (usz i = 0; i < strlen(keybuf); i++) {
+      keybuf[i] = tolower(keybuf[i]);
+    }
   }
 
   key_entry->type = TOML_STRING;
@@ -43,7 +43,98 @@ static bool tt_toml_write_key(toml_datum_t *tab, char *key, tt_button_kind_e kin
   return true;
 }
 
-void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath) {
+static bool tt_key_load(toml_datum_t *key_table, const char *key,
+                        tt_button_kind_e *btn_kind,
+                        ttb_mouse_button_e *mouse_btn,
+                        ttb_keyboard_key_e *keykey, allocator_t *alloc) {
+  toml_datum_t default_key = toml_get(*key_table, key);
+  if (default_key.type != TOML_STRING) {
+    log_error("Expected value of 'default' to be a string");
+    return false;
+  }
+
+  dyn_string_t default_key_str = dyn_string_makef(
+      alloc, "%.*s", default_key.u.str.len, default_key.u.str.ptr);
+
+  if (strncmp(default_key_str.string, "keyboard_", sizeof("keyboard_") - 1) ==
+      0) {
+    char *default_key_str_nopre =
+        default_key_str.string + sizeof("keyboard_") - 1;
+    default_key_str_nopre = str_fmt_temp("ttb_%s", default_key_str_nopre);
+    *btn_kind = TT_BUTTON_KEYBOARD;
+    *keykey = ttb_key_from_str(default_key_str_nopre);
+  } else if (strncmp(default_key_str.string, "mouse_", sizeof("mouse_") - 1) ==
+             0) {
+    char *default_key_str_nopre = default_key_str.string + sizeof("mouse_") - 1;
+    default_key_str_nopre = str_fmt_temp("ttb_%s", default_key_str_nopre);
+    *btn_kind = TT_BUTTON_MOUSE;
+    *mouse_btn = ttb_mouse_btn_from_str(default_key_str_nopre);
+  }
+
+  return true;
+}
+
+void tt_keymap_load(tt_keymap_t *keymap, const char *filepath,
+                    bool load_default, allocator_t *alloc) {
+  toml_result_t toml_result = toml_parse_file_ex(filepath);
+  if (!toml_result.ok) {
+    log_error("Failed to parse toml file: %s", toml_result.errmsg);
+    return;
+  }
+
+  toml_datum_t *toml = &toml_result.toptab;
+  for (i32 ikeybind = 0; ikeybind < toml->u.tab.size; ikeybind++) {
+    const char *key = toml->u.tab.key[ikeybind];
+    i32 key_len = toml->u.tab.len[ikeybind];
+    toml_datum_t *val = &toml->u.tab.value[ikeybind];
+
+    dyn_string_t key_str = dyn_string_makef(alloc, "%.*s", key_len, key);
+
+    tt_keymap_entry_t entry = {
+        .name = key_str.string,
+        .id = array_len(keymap->entries),
+    };
+
+    if (val->type != TOML_TABLE) {
+      log_error("Expected keybind value to be table");
+      continue;
+    }
+
+    if (load_default && toml_seek(*val, "default").type != TOML_UNKNOWN) {
+      tt_key_load(val, "default", &entry.default_kind, &entry.default_mouse_btn,
+                  &entry.default_key, alloc);
+    }
+
+    tt_key_load(val, "selected", &entry.selected_kind,
+                &entry.selected_mouse_btn, &entry.selected_key, alloc);
+
+    bool found_entry = false;
+    tt_keymap_entry_t *entry_iter;
+    array_foreach(keymap->entries, entry_iter) {
+      if (str_eq(entry_iter->name, key_str.string)) {
+        if (load_default) {
+          entry_iter->default_key = entry.default_key;
+          entry_iter->default_mouse_btn = entry.default_mouse_btn;
+          entry_iter->default_kind = entry.default_kind;
+        }
+
+        entry_iter->selected_key = entry.selected_key;
+        entry_iter->selected_mouse_btn = entry.selected_mouse_btn;
+        entry_iter->selected_kind = entry.selected_kind;
+
+        found_entry = true;
+        break;
+      }
+    }
+
+    if (!found_entry) {
+      log_warn("Unused keybind entry: '%s'", key_str.string);
+    }
+  }
+}
+
+void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath,
+                    bool save_default) {
   bump_t toml_bump = {0};
   bump_init(&toml_bump, 16000);
   allocator_t toml_alloc = {0};
@@ -63,11 +154,15 @@ void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath) {
     }
     val->type = TOML_TABLE;
 
-    if (!tt_toml_write_key(val, "default", entry->default_kind, entry->default_mouse_btn, entry->default_key, &toml_bump, &errbuf)) {
+    if (save_default && !tt_toml_write_key(val, "default", entry->default_kind,
+                           entry->default_mouse_btn, entry->default_key,
+                           &toml_bump, &errbuf)) {
       log_error("Failed to write default key: %s", errbuf);
     }
 
-    if (!tt_toml_write_key(val, "selected", entry->selected_kind, entry->selected_mouse_btn, entry->selected_key, &toml_bump, &errbuf)) {
+    if (!tt_toml_write_key(val, "selected", entry->selected_kind,
+                           entry->selected_mouse_btn, entry->selected_key,
+                           &toml_bump, &errbuf)) {
       log_error("Failed to write selected key: %s", errbuf);
     }
   }
@@ -91,7 +186,7 @@ void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath) {
 }
 
 tt_keymap_id_t tt_keymap_bind_key(tt_keymap_t *keymap, const char *name,
-                                  ttb_keyboard_key_t default_key) {
+                                  ttb_keyboard_key_e default_key) {
   u64 id = array_len(keymap->entries);
   tt_keymap_entry_t entry = {
       .id = id,

@@ -17,11 +17,11 @@ typedef struct tt_keymap_entry {
   const char *name;
 
   tt_button_kind_e default_kind;
-  ttb_keyboard_key_t default_key;
+  ttb_keyboard_key_e default_key;
   ttb_mouse_button_e default_mouse_btn;
 
   tt_button_kind_e selected_kind;
-  ttb_keyboard_key_t selected_key;
+  ttb_keyboard_key_e selected_key;
   ttb_mouse_button_e selected_mouse_btn;
 
   bool pressed;
@@ -36,16 +36,16 @@ void tt_keymap_init(tt_keymap_t *keymap, allocator_t *alloc);
 
 void tt_keymap_deinit(tt_keymap_t *keymap);
 
-void tt_keymap_load(tt_keymap_t *keymap, const char *filepath);
+void tt_keymap_load(tt_keymap_t *keymap, const char *filepath, bool load_default, allocator_t *alloc);
 
-void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath);
+void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath, bool save_default);
 
 void tt_keymap_handle_input_event(tt_engine_client_t *engine,
                                   tt_keymap_t *keymap,
                                   const ttb_event_t *event);
 
 tt_keymap_id_t tt_keymap_bind_key(tt_keymap_t *keymap, const char *name,
-                                  ttb_keyboard_key_t default_key);
+                                  ttb_keyboard_key_e default_key);
 
 tt_keymap_id_t tt_keymap_bind_btn(tt_keymap_t *keymap, const char *name,
                                   ttb_mouse_button_e default_btn);

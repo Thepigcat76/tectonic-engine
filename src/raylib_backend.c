@@ -48,9 +48,9 @@ void tt_backend_destroy(tt_backend_t *backend) {
   alloc->dealloc(alloc, backend);
 }
 
-static ttb_keyboard_key_t ttb_key_from_rl(KeyboardKey rl_key);
+static ttb_keyboard_key_e ttb_key_from_rl(KeyboardKey rl_key);
 
-static KeyboardKey rl_key_from_ttb(ttb_keyboard_key_t key);
+static KeyboardKey rl_key_from_ttb(ttb_keyboard_key_e key);
 
 void ttb_events_poll(tt_backend_t *backend) {
   if (WindowShouldClose()) {
@@ -63,7 +63,7 @@ void ttb_events_poll(tt_backend_t *backend) {
 
   KeyboardKey rl_key = GetKeyPressed();
   if (rl_key != KEY_NULL) {
-    ttb_keyboard_key_t key = ttb_key_from_rl(rl_key);
+    ttb_keyboard_key_e key = ttb_key_from_rl(rl_key);
 
     i32 key_state = -1;
 
@@ -87,7 +87,7 @@ void ttb_events_poll(tt_backend_t *backend) {
   }
 }
 
-bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_t key) {
+bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key) {
   return IsKeyDown(rl_key_from_ttb(key));
 }
 
@@ -140,7 +140,7 @@ void *ttb_asset_load(tt_backend_t *backend, allocator_t *asset_alloc,
     return tex;
   } break;
   case TT_ASSET_SOUND: {
-
+    // TODO: Load other assets
   } break;
   case TT_ASSET_SHADER: {
 
@@ -213,7 +213,7 @@ void _ttb_cmds_render(tt_backend_t *backend) {
 }
 
 
-static ttb_keyboard_key_t ttb_key_from_rl(KeyboardKey rl_key) {
+static ttb_keyboard_key_e ttb_key_from_rl(KeyboardKey rl_key) {
   switch (rl_key) {
   case KEY_NULL:
     return TTB_KEY_NULL;
@@ -444,7 +444,7 @@ static ttb_keyboard_key_t ttb_key_from_rl(KeyboardKey rl_key) {
   }
 }
 
-static KeyboardKey rl_key_from_ttb(ttb_keyboard_key_t key) {
+static KeyboardKey rl_key_from_ttb(ttb_keyboard_key_e key) {
   switch (key) {
     case TTB_KEY_NULL: return KEY_NULL;
     // Letters
