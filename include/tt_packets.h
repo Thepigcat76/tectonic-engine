@@ -47,31 +47,13 @@ typedef void (*tt_packet_decode_func_t)(tt_packet_t *, tt_byte_buf_t *,
 // field. Alternatively, the developer can also provide a custom function for
 // serializing the packet.
 
-// EXPERIMENTAL
-#define TT_MAX_STRUCT_FIELDS 32
-typedef void (*tt_networking_encode_func_t)(const void *, tt_byte_buf_t *,
-                                            tt_packet_context_t);
-typedef void (*tt_networking_decode_func_t)(void *, tt_byte_buf_t *,
-                                            tt_packet_context_t);
-typedef struct tt_packet_struct_field {
-  const char *name;
-  i32 size;
-  i32 offset;
-  tt_networking_encode_func_t encode_func;
-  tt_networking_decode_func_t decode_func;
-} tt_packet_struct_field_t;
-typedef struct tt_struct_info {
-  tt_packet_struct_field_t fields[TT_MAX_STRUCT_FIELDS];
-  usz fields_count;
-} tt_struct_info_tt;
-
 typedef struct tt_packet_info {
   tt_packet_id_t packet_id;
+  tt_packet_handle_t packet_handle;
   tt_packet_encode_func_t encode_func;
   tt_packet_decode_func_t decode_func;
   tt_packet_dir_e packet_dir;
   usz payload_size;
-  tt_struct_info_tt struct_info;
 } tt_packet_info_t;
 
 typedef struct tt_packet {
@@ -80,22 +62,24 @@ typedef struct tt_packet {
   void *payload;
 } tt_packet_t;
 
-void tt_encode_i8(const i16 *val, tt_byte_buf_t *buf,
-                   tt_packet_context_t ctx);
+void tt_encode_packet(const tt_packet_t *packet, tt_packet_info_t info, tt_byte_buf_t *buf, void *encode_ctx);
 
-void tt_decode_i8(i16 *val, tt_byte_buf_t *buf, tt_packet_context_t ctx);
+// Preceeding the packet bytes, there are 4 bytes containing the packet handle.
+// This handle is required for initializing the packet parameter
+void tt_decode_packet(tt_packet_t *packet, tt_packet_info_t info, tt_byte_buf_t *buf, void *decode_ctx);
 
-void tt_encode_i16(const i16 *val, tt_byte_buf_t *buf,
-                   tt_packet_context_t ctx);
+void tt_encode_string(const char *string, tt_byte_buf_t *buf, void *encode_ctx);
 
-void tt_decode_i16(i16 *val, tt_byte_buf_t *buf, tt_packet_context_t ctx);
+void tt_decode_string(char *string, tt_byte_buf_t *buf, void *decode_ctx);
 
-void tt_encode_i32(const i32 *val, tt_byte_buf_t *buf,
-                   tt_packet_context_t ctx);
+void tt_encode_i16(i16 val, tt_byte_buf_t *buf, tt_packet_context_t ctx);
 
-void tt_decode_i32(i32 *val, tt_byte_buf_t *buf, tt_packet_context_t ctx);
+i16 tt_decode_i16(tt_byte_buf_t *buf, tt_packet_context_t ctx);
 
-void tt_encode_i64(const i64 *val, tt_byte_buf_t *buf,
-                   tt_packet_context_t ctx);
+void tt_encode_i32(i32 val, tt_byte_buf_t *buf, tt_packet_context_t ctx);
 
-void tt_decode_i64(i64 *val, tt_byte_buf_t *buf, tt_packet_context_t ctx);
+i32 tt_decode_i32(tt_byte_buf_t *buf, tt_packet_context_t ctx);
+
+void tt_encode_i64(i64 val, tt_byte_buf_t *buf, tt_packet_context_t ctx);
+
+i64 tt_decode_i64(tt_byte_buf_t *buf, tt_packet_context_t ctx);

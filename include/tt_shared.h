@@ -2,6 +2,10 @@
 
 #include "lilc/numbers.h"
 
+typedef struct tt_engine_client tt_engine_client_t;
+
+typedef struct tt_engine_server tt_engine_server_t;
+
 #ifndef TT_ENTTIY_TYPE
 #define TT_ENTITY_TYPE u64
 #endif

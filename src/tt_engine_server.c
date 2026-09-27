@@ -3,6 +3,8 @@
 #include "lilc/deque.h"
 #include "lilc/log.h"
 #include "lilsockets.h"
+#include <bits/pthreadtypes.h>
+#include <lilc/alloc.h>
 #include <pthread.h>
 #include <sys/cdefs.h>
 #include <sys/poll.h>
@@ -42,54 +44,46 @@ void ttes_server_stop(tt_engine_server_t *engine) {
   pthread_rwlock_unlock(&engine->server.server_lock);
 }
 
-extern bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos, tt_byte_buf_t *packet_queue,
-                         pthread_mutex_t *packet_queue_mutex,
-                         tt_packet_t *out_packet, allocator_t *packet_alloc,
-                         void *decode_ctx);
+extern bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,
+                                tt_byte_buf_t *packet_queue,
+                                pthread_mutex_t *packet_queue_mutex,
+                                tt_packet_t *out_packet,
+                                allocator_t *packet_alloc, void *decode_ctx);
 
-void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet, tt_packet_handle_t packet_handle, void *payload) {
-  tt_packet_info_t packet_info = engine->server.packet_infos.infos[packet_handle];
+void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
+                      tt_packet_handle_t packet_handle, void *payload) {
+  tt_packet_info_t packet_info =
+      engine->server.packet_infos.infos[packet_handle];
 
   packet->packet_handle = packet_handle;
   packet->packet_id = packet_info.packet_id;
 
   pthread_rwlock_wrlock(&engine->server.server_lock);
-  packet->payload = engine->server.packet_alloc.alloc(&engine->server.packet_alloc, packet_info.payload_size);
+  packet->payload = engine->server.packet_alloc.alloc(
+      &engine->server.packet_alloc, packet_info.payload_size);
   pthread_rwlock_unlock(&engine->server.server_lock);
 }
 
 bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
                      void *decode_ctx) {
-  return tt_packet_queue_pop(&engine->server.packet_infos, engine->server.packet_data_queue,
+  return tt_packet_queue_pop(&engine->server.packet_infos,
+                             engine->server.packet_data_queue,
                              &engine->server.packet_queue_mutex, packet,
                              &engine->server.packet_alloc, decode_ctx);
 }
 
+extern bool tt_handle_connection(addr_t recv_addr,
+                                 allocator_t *packet_alloc,
+                                 pthread_mutex_t *packet_queue_mutex,
+                                 tt_byte_buf_t **packet_data_queue);
+
 // Server rwlock already locked
 static bool tt_server_handle_client_connection(tt_server_t *server,
                                                u64 client_id) {
-  u8 len_buf[8];
-  i64 len_res = sockets_receive(client_id, len_buf, 8);
-  if (len_res != 4) {
-    return false;
-  }
+  addr_t client_addr = server->connected_clients[client_id].address;
 
-  u32 len = (len_buf[0] << 24) | (len_buf[1] << 16) | (len_buf[2] << 8) |
-            (len_buf[3] << 0);
-
-  tt_byte_buf_t bytebuf = {0};
-  tt_byte_buf_init(&bytebuf, &server->packet_alloc, len);
-
-  i64 payload_res = sockets_receive(client_id, bytebuf.bytes, len);
-  if (payload_res == -1) {
-    return false;
-  }
-
-  pthread_mutex_lock(&server->packet_queue_mutex);
-  deque_push_back(server->packet_data_queue, bytebuf);
-  pthread_mutex_unlock(&server->packet_queue_mutex);
-
-  return true;
+  return tt_handle_connection(client_addr, &server->packet_alloc,
+      &server->packet_queue_mutex, &server->packet_data_queue);
 }
 
 static void *ttes_packet_receiver_run(void *arg) {

@@ -5,13 +5,11 @@
 #include "lilc/bump.h"
 #include "lilsockets.h"
 #include "tt_assets.h"
+#include "tt_keys.h"
+#include "lilc/deque.h"
 #include "tt_packets.h"
 #include "tt_shared.h"
 #include <pthread.h>
-
-typedef struct tt_engine_client tt_engine_client_t;
-
-typedef struct tt_engine_server tt_engine_server_t;
 
 typedef struct tt_subproc_info {
   const char *subproc_name;
@@ -21,6 +19,7 @@ typedef struct tt_subproc_info {
 
 // -- NETWORKING --
 
+// TODO: Change direct addr to id
 void tt_packet_send_client(tt_engine_server_t *srvr_engine, addr_t client_addr,
                            tt_packet_t packet, void *encode_ctx);
 
@@ -53,17 +52,17 @@ struct tt_server {
   pthread_rwlock_t server_lock;
   addr_t address;
 
-  poll_client_t *poll_clients;
+  array_t(poll_client_t) poll_clients;
 
   tt_server_state_e state;
 
   bool integrated;
 
-  tt_client_desc_t *connected_clients;
+  array_t(tt_client_desc_t) connected_clients;
 
-  tt_byte_buf_t *packet_data_queue;
+  deque_t(tt_byte_buf_t) packet_data_queue;
   pthread_mutex_t packet_queue_mutex;
-  
+
   tt_packet_info_array_t packet_infos;
 
   bump_t packet_bump;
@@ -91,9 +90,9 @@ struct tt_client_connection {
 
   tt_client_state_e state;
 
-  tt_byte_buf_t *packet_data_queue;
+  deque_t(tt_byte_buf_t) packet_data_queue;
   pthread_mutex_t packet_queue_mutex;
-  
+
   tt_packet_info_array_t packet_infos;
 
   bump_t packet_bump;
@@ -101,7 +100,9 @@ struct tt_client_connection {
 };
 #endif
 
-void tt_packet_info_add(tt_packet_info_array_t *packet_infos, tt_packet_info_t packet_info);
+void tt_packet_info_add(tt_packet_info_array_t *packet_infos,
+                        tt_packet_handle_t handle,
+                        tt_packet_info_t packet_info);
 
 void tt_packet_info_lock(tt_packet_info_array_t *packet_infos);
 
@@ -118,7 +119,7 @@ typedef enum ttec_subprocess {
 
 // prefix: ttec
 struct tt_engine_client {
-  ttb_event_array_t events;
+  ttb_event_deque_t events;
   tt_backend_t *backend;
 
   tt_subproc_info_t subproc_infos[_amount_ttec_subprocesses];
@@ -150,7 +151,8 @@ bool ttec_update(tt_engine_client_t *engine);
 
 bool ttec_connect(tt_engine_client_t *engine, const char *ipaddr, u32 port);
 
-void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet, tt_packet_handle_t packet_handle, void *payload);
+// void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet,
+// tt_packet_handle_t packet_handle, void *payload);
 
 bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
                      void *decode_ctx);
@@ -173,7 +175,7 @@ typedef enum ttes_subprocess {
 } ttes_subprocess_e;
 
 struct tt_engine_server {
-  ttb_event_array_t events;
+  ttb_event_deque_t events;
   tt_backend_t *backend;
 
   tt_subproc_info_t subproc_infos[_amount_ttes_subprocesses];
@@ -187,7 +189,8 @@ void ttes_deinit(tt_engine_server_t *engine);
 
 bool ttes_update(tt_engine_server_t *engine);
 
-void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet, tt_packet_handle_t packet_handle, void *payload);
+// void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
+// tt_packet_handle_t packet_handle, void *payload);
 
 bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
                      void *decode_ctx);

@@ -20,5 +20,14 @@ The main game logic, depending on your implementation can be shared obviously. C
 
 The actual game logic is mostly up to the user, whether you use an ECS, a more traditional entity approach or something completely different does not matter. To interact between the described processes, the user has to implement handling for packets in their game loop on both the server and the client.
 
+-------
 
+## Finished packet sending and receiving
 
+## Implemented text rendering and input
+
+## Implemented keymap
+
+## Started working on lanuage manager
+
+## Started working on resource files using toml

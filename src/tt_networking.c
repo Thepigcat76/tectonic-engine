@@ -1,3 +1,4 @@
+#include <lilc/log.h>
 #define LILSOCKETS_IMPL
 #include "../include/tt_engine.h"
 #include "lilc/alloc.h"
@@ -88,45 +89,32 @@ usz tt_byte_buf_len(tt_byte_buf_t *byte_buf) {
   return array_len(byte_buf->bytes);
 }
 
-void tt_packet_encode(const tt_packet_t *packet, tt_packet_info_t *packet_info,
-                      tt_byte_buf_t *byte_buf, tt_packet_context_t context) {
-  tt_struct_info_tt struct_info = packet_info->struct_info;
-  u8 *payload = packet->payload;
-
-  for (usz i = 0; i < struct_info.fields_count; i++) {
-    tt_packet_struct_field_t field = struct_info.fields[i];
-    const void *field_data = payload + field.offset;
-    field.encode_func(field_data, byte_buf, context);
-  }
+void tt_encode_packet(const tt_packet_t *packet, tt_packet_info_t info,
+                      tt_byte_buf_t *buf, void *encode_ctx) {
+  tt_encode_i32(info.packet_handle, buf, encode_ctx);
+  info.encode_func(packet, buf, encode_ctx);
 }
 
-void tt_packet_decode(tt_packet_t *packet, tt_packet_info_t *packet_info,
-                      tt_byte_buf_t *byte_buf, tt_packet_context_t context) {
-  tt_struct_info_tt struct_info = packet_info->struct_info;
-  u8 *payload = packet->payload;
-
-  for (usz i = 0; i < struct_info.fields_count; i++) {
-    tt_packet_struct_field_t field = struct_info.fields[i];
-    void *field_data = payload + field.offset;
-    field.decode_func(field_data, byte_buf, context);
-  }
+void tt_decode_packet(tt_packet_t *packet, tt_packet_info_t info,
+                      tt_byte_buf_t *buf, void *decode_ctx) {
+  info.decode_func(packet, buf, decode_ctx);
 }
 
 void tt_packet_send_client(tt_engine_server_t *srvr_engine, addr_t client_addr,
                            tt_packet_t packet, void *encode_ctx) {
-  tt_packet_info_t *info = NULL;
-
+  pthread_rwlock_wrlock(&srvr_engine->server.server_lock);
   tt_byte_buf_t byte_buf = {0};
   tt_byte_buf_init(&byte_buf, &srvr_engine->server.packet_alloc, 256);
 
-  tt_encode_i32((i32 *)&packet.packet_handle, &byte_buf, encode_ctx);
-
-  tt_packet_encode(&packet, info, &byte_buf, NULL);
+  tt_encode_packet(&packet,
+                   srvr_engine->server.packet_infos.infos[packet.packet_handle],
+                   &byte_buf, encode_ctx);
 
   u32 bytebuf_len = tt_byte_buf_len(&byte_buf);
 
   sockets_send(client_addr, &bytebuf_len, sizeof(u32));
   sockets_send(client_addr, byte_buf.bytes, bytebuf_len);
+  pthread_rwlock_unlock(&srvr_engine->server.server_lock);
 }
 
 void tt_packet_send_all_clients(tt_engine_server_t *srvr_engine,
@@ -139,13 +127,28 @@ void tt_packet_send_all_clients(tt_engine_server_t *srvr_engine,
 }
 
 void tt_packet_send_server(tt_engine_client_t *client_engine,
-                           tt_packet_t packet, void *encode_ctx) {}
+                           tt_packet_t packet, void *encode_ctx) {
+  pthread_rwlock_wrlock(&client_engine->client_connection.connection_rwlock);
+  tt_byte_buf_t byte_buf = {0};
+  tt_byte_buf_init(&byte_buf, &client_engine->client_connection.packet_alloc,
+                   256);
 
-static void tt_encode_num(const void *num, u64 num_size, tt_byte_buf_t *buf,
+  tt_encode_packet(&packet,
+                   client_engine->client_connection.packet_infos.infos[packet.packet_handle],
+                   &byte_buf, encode_ctx);
+
+  u32 bytebuf_len = tt_byte_buf_len(&byte_buf);
+
+  sockets_send(client_engine->client_connection.server_addr, &bytebuf_len, sizeof(u32));
+  sockets_send(client_engine->client_connection.server_addr, byte_buf.bytes, bytebuf_len);
+  pthread_rwlock_unlock(&client_engine->client_connection.connection_rwlock);
+}
+
+static void tt_encode_num(i64 num, u64 num_size, tt_byte_buf_t *buf,
                           void *encode_ctx) {
   (void)encode_ctx;
 
-  if (num == NULL || buf == NULL || num_size == 0 || num_size > sizeof(i64)) {
+  if (buf == NULL || num_size == 0 || num_size > sizeof(i64)) {
     return;
   }
 
@@ -155,12 +158,11 @@ static void tt_encode_num(const void *num, u64 num_size, tt_byte_buf_t *buf,
   }
 }
 
-static void tt_decode_num(void *num, u64 num_size, tt_byte_buf_t *buf,
-                          void *encode_ctx) {
+static i64 tt_decode_num(u64 num_size, tt_byte_buf_t *buf, void *encode_ctx) {
   (void)encode_ctx;
 
-  if (num == NULL || buf == NULL || num_size == 0 || num_size > sizeof(i64)) {
-    return;
+  if (buf == NULL || num_size == 0 || num_size > sizeof(i64)) {
+    return 0;
   }
 
   u64 val = 0;
@@ -174,32 +176,29 @@ static void tt_decode_num(void *num, u64 num_size, tt_byte_buf_t *buf,
     val |= UINT64_MAX << (num_size * 8);
   }
 
-  *(i64 *)num = (i64)val;
+  return val;
 }
 
-void tt_encode_i64(const i64 *i64_val, tt_byte_buf_t *buf,
-                   tt_packet_context_t ctx) {
-  tt_encode_num(i64_val, sizeof(i64), buf, ctx);
+void tt_encode_i64(i64 val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+  tt_encode_num(val, sizeof(i64), buf, ctx);
 }
 
-void tt_decode_i64(i64 *i64_val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
-  tt_decode_num(i64_val, sizeof(i64), buf, ctx);
+i64 tt_decode_i64(tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+  return tt_decode_num(sizeof(i64), buf, ctx);
 }
 
-void tt_encode_i32(const i32 *i32_val, tt_byte_buf_t *buf,
-                   tt_packet_context_t ctx) {
-  tt_encode_num(i32_val, sizeof(i32), buf, ctx);
+void tt_encode_i32(i32 val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+  tt_encode_num(val, sizeof(i32), buf, ctx);
 }
 
-void tt_decode_i32(i32 *i32_val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
-  tt_decode_num(i32_val, sizeof(i32), buf, ctx);
+i32 tt_decode_i32(tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+  return tt_decode_num(sizeof(i32), buf, ctx);
 }
 
-void tt_encode_i16(const i16 *i16_val, tt_byte_buf_t *buf,
-                   tt_packet_context_t ctx) {
-  tt_encode_num(i16_val, sizeof(i16), buf, ctx);
+void tt_encode_i16(i16 val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+  tt_encode_num(val, sizeof(i16), buf, ctx);
 }
 
-void tt_decode_i16(i16 *i16_val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
-  tt_decode_num(i16_val, sizeof(i16), buf, ctx);
+i16 tt_decode_i16(tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+  return tt_decode_num(sizeof(i16), buf, ctx);
 }

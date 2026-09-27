@@ -114,6 +114,7 @@ int main(int argc, char **argv) {
 
   // Compile src files (cached)
   walk_dir("src", visit_entry);
+  walk_dir("vendor", visit_entry);
 
   if (running) {
     walk_dir("example", visit_entry);

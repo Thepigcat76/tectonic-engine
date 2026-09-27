@@ -96,7 +96,7 @@ bool ttec_connect(tt_engine_client_t *engine, const char *ipaddr, u32 port) {
   engine->client_connection.state = TT_CLIENT_CONNECTED;
   pthread_rwlock_unlock(&engine->client_connection.connection_rwlock);
 
-  return false;
+  return true;
 }
 
 extern bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,
@@ -114,9 +114,16 @@ bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
                              decode_ctx);
 }
 
-static void ttec_packet_recv(tt_client_connection_t *connection,
-                             addr_t server_addr, tt_packet_t *packet) {
-  packet->packet_id = -1;
+extern bool tt_handle_connection(addr_t recv_addr, allocator_t *packet_alloc,
+                                 pthread_mutex_t *packet_queue_mutex,
+                                 tt_byte_buf_t **packet_data_queue);
+
+// client connection rwlock is locked
+static bool ttec_packet_recv(tt_client_connection_t *connection,
+                             addr_t server_addr) {
+  return tt_handle_connection(server_addr, &connection->packet_alloc,
+                              &connection->packet_queue_mutex,
+                              &connection->packet_data_queue);
 }
 
 void ttec_client_stop(tt_engine_client_t *engine) {
@@ -148,24 +155,11 @@ static void *ttec_packet_receiver_run(void *arg) {
       }
 
       // do stuff ...
-      // TODO: Decode on main thread
-      log_debug("Listening for packets");
-      tt_packet_t packet = {0};
-      log_debug("Packet ptr: %p", packet.payload);
-      ttec_packet_recv(connection, server_addr, &packet);
-      log_debug("Packet: %zu", packet.packet_id);
-
-      if (packet.packet_id == -1) {
-        perror("Error packet on client");
-        exit(1);
+      pthread_rwlock_rdlock(&connection->connection_rwlock);
+      if (!ttec_packet_recv(connection, server_addr)) {
+        log_error("Failed to receive packet from server");
       }
-
-      // pthread_rwlock_rdlock(&connection->connection_rwlock);
-      //{
-      log_debug("Adding packet to queue");
-      // deque_push_back(connection->packet_data_queue, packet);
-      //}
-      // pthread_rwlock_unlock(&connection->connection_rwlock);
+      pthread_rwlock_unlock(&connection->connection_rwlock);
     } break;
     case TT_CLIENT_STOPPED: {
       server_addr = -1;
