@@ -1,10 +1,13 @@
 #pragma once
 
+#include "lilc/color.h"
 #include "lilc/numbers.h"
 
 typedef struct tt_engine_client tt_engine_client_t;
 
 typedef struct tt_engine_server tt_engine_server_t;
+
+typedef struct tt_backend tt_backend_t;
 
 #ifndef TT_ENTTIY_TYPE
 #define TT_ENTITY_TYPE u64
@@ -47,5 +50,8 @@ typedef enum tt_asset_category {
 typedef struct tt_asset_manager tt_asset_manager_t;
 
 typedef struct tt_entity_manager tt_entity_manager_t;
+
+#define TT_COLOR_WHITE (color_make(255, 255, 255, 255))
+#define TT_COLOR_BLACK (color_make(0, 0, 0, 255))
 
 void tt_wait(i32 millis);

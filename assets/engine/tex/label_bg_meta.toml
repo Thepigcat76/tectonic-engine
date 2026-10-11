@@ -1,0 +1,4 @@
+[scaling]
+enabled = true
+kind = "nine-slice"
+border-width = 6

@@ -11,6 +11,14 @@ typedef struct {
 } component_pos_t;
 
 typedef struct {
+  i32 width;
+  i32 height;
+  i32 depth;
+
+  bool present;
+} component_box_t;
+
+typedef struct {
   tt_asset_id_t texture;
 
   bool present;

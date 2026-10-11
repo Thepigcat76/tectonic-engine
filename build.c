@@ -9,6 +9,7 @@
 #define OUT_NAME "build/tectonic"
 
 #define LIB_LILC "lilc"
+#define LIB_CJSON "cjson"
 #define LIB_RAYLIB "raylib"
 #define LIB_GL "GL"
 #define LIB_MATH "m"
@@ -127,6 +128,11 @@ int main(int argc, char **argv) {
 
   // Libraries
   cmd_appendf(&cmd, "-l" LIB_LILC);
+  cmd_appendf(&cmd, "-l" LIB_CJSON);
+
+  if (DEBUG)  {
+    cmd_appendf(&cmd, "-rdynamic");
+  }
 
   //printf("Adding modules\n");
 

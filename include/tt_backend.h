@@ -1,13 +1,14 @@
 #pragma once
 
+#include "tt_camera.h"
+#include "tt_shared.h"
+
 #include "lilc/alloc.h"
 #include "lilc/color.h"
 #include "lilc/deque.h"
-#include "tt_shared.h"
+
 #include <stdbool.h>
 #include <strings.h>
-
-typedef struct tt_backend tt_backend_t;
 
 typedef enum ttb_event_id {
   TTB_EVENT_WINDOW_CLOSED,
@@ -42,8 +43,6 @@ typedef struct ttb_event_mouse_input {
   ttb_key_state_t left_button;
   ttb_key_state_t right_button;
   ttb_key_state_t middle_button;
-  i32 scroll_x;
-  i32 scroll_y;
 } ttb_event_mouse_input_t;
 
 typedef enum ttb_keyboard_key {
@@ -176,7 +175,7 @@ typedef enum ttb_keyboard_key {
 
 static ttb_keyboard_key_e ttb_key_from_str(const char *key_str) {
 #define STR_CASE(name)                                                         \
-  if (strcasecmp(key_str, #name) == 0)                                              \
+  if (strcasecmp(key_str, #name) == 0)                                         \
     return name;
   TTB_KEYBOARD_ITER(STR_CASE)
 #undef STR_CASE
@@ -242,6 +241,8 @@ typedef struct ttb_render_cmd {
     TTB_RENDER_CMD_TEXTURE,
     TTB_RENDER_CMD_RECTANGLE,
     TTB_RENDER_CMD_TEXT,
+    TTB_RENDER_CMD_APPLY_CAM,
+    TTB_RENDER_CMD_UNAPPLY_CAM,
     TTB_RENDER_CMD_CLEAR,
   } cmd_id;
   union ttb_render_cmd_data {
@@ -265,6 +266,12 @@ typedef struct ttb_render_cmd {
       i32 x;
       i32 y;
     } cmd_text;
+    struct ttb_cmd_apply_camera {
+      tt_camera_t cam;
+    } cmd_apply_cam;
+    struct ttb_cmd_unapply_camera {
+      u64 cam_id;
+    } cmd_unapply_cam;
     struct ttb_cmd_clear {
       color_t bg_color;
     } cmd_clear;
@@ -275,18 +282,32 @@ typedef enum ttb_render_cmd_id ttb_render_cmd_id_t;
 
 typedef union ttb_render_cmd_data ttb_render_cmd_data_t;
 
+u32 ttb_text_width(tt_backend_t *backend, const char *text, usz font_size);
+
 void ttb_render(tt_backend_t *backend, ttb_render_cmd_t render_cmd);
 
 bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key);
 
 bool ttb_mouse_down(tt_backend_t *backend, ttb_mouse_button_e btn);
 
+i32 ttb_mouse_x(tt_backend_t *backend);
+
+i32 ttb_mouse_y(tt_backend_t *backend);
+
+i32 ttb_screen_width(tt_backend_t *backend);
+
+i32 ttb_screen_height(tt_backend_t *backend);
+
+bool ttb_camera_make_id(tt_backend_t *backend, u64 *cam_id);
+
 void _ttb_cmds_render(tt_backend_t *backend);
 
 void _ttb_keys_update(tt_backend_t *backend);
 
+// prev param is used for stuff like shaders that might have multiple variants
 void *ttb_asset_load(tt_backend_t *backend, allocator_t *asset_alloc,
-                     tt_asset_category_t category, const char *path);
+                     tt_asset_category_t category, const char *path,
+                     void *prev);
 
 void ttb_asset_unload(tt_backend_t *backend, allocator_t *asset_alloc,
                       tt_asset_category_t category, void *asset);

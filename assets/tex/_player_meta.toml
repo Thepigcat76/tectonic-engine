@@ -1,0 +1,18 @@
+[animation]
+enabled = true
+frame-height = 32
+frame-time = 200
+frames = [0, 0, 2, 2, 1, 2, 4, 5, 6, 3, 3, 2, 0]
+
+[tiling]
+enabled = true
+fallback_tex = "dirt_single.png"
+
+[variants]
+enabled = true
+variants = ["dirt.png", "dirt1.png", "dirt2.png"]
+
+[scaling]
+enabled = true
+kind = "nine-slice"
+border-width = 7

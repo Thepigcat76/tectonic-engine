@@ -2945,35 +2945,45 @@ static size_t toml_datum_print(toml_datum_t *datum, char *buf);
 
 static size_t toml_key_print(const char *key, int32_t len, char *buf) {
   if (strchr(key, ' ') != NULL) {
-    strcat(buf, "\"");
-    strncat(buf, key, len);
-    strcat(buf, "\"");
+    if (buf != NULL)
+      strcat(buf, "\"");
+    if (buf != NULL)
+      strncat(buf, key, len);
+    if (buf != NULL)
+      strcat(buf, "\"");
     return len + 2;
   }
 
-  strncat(buf, key, len);
+  if (buf != NULL)
+    strncat(buf, key, len);
   return len;
 }
 
 static size_t toml_tab_print(toml_datum_t *datum, char *buf, bool inline_tab) {
   size_t size = 0;
   if (inline_tab) {
-    strcat(buf, "{");
+    if (buf != NULL)
+      strcat(buf, "{");
     for (int32_t i = 0; i < datum->u.tab.size; i++) {
       const char *key = datum->u.tab.key[i];
       int32_t len = datum->u.tab.len[i];
       toml_datum_t value = datum->u.tab.value[i];
 
       size += toml_key_print(key, len, buf);
-      strcat(buf, " = ");
+      if (buf != NULL)
+        strcat(buf, " = ");
       size += 3;
       size += toml_datum_print(&value, buf);
       if (i != datum->u.tab.size - 1) {
-        strcat(buf, ", ");
+        if (buf != NULL)
+          strcat(buf, ", ");
         size += 2;
       }
     }
-    strcat(buf, "}");
+    if (buf != NULL) {
+      if (buf != NULL)
+        strcat(buf, "}");
+    }
   } else {
     for (int32_t i = 0; i < datum->u.tab.size; i++) {
       const char *key = datum->u.tab.key[i];
@@ -2981,10 +2991,12 @@ static size_t toml_tab_print(toml_datum_t *datum, char *buf, bool inline_tab) {
       toml_datum_t value = datum->u.tab.value[i];
 
       size += toml_key_print(key, len, buf);
-      strcat(buf, " = ");
+      if (buf != NULL)
+        strcat(buf, " = ");
       size += 3;
       size += toml_datum_print(&value, buf);
-      strcat(buf, "\n");
+      if (buf != NULL)
+        strcat(buf, "\n");
       size += 1;
     }
   }
@@ -2997,25 +3009,33 @@ static size_t toml_datum_print(toml_datum_t *datum, char *buf) {
   case TOML_UNKNOWN:
     return 0;
   case TOML_STRING: {
-    strcat(buf, "\"");
-    strncat(buf, datum->u.str.ptr, datum->u.str.len);
-    strcat(buf, "\"");
+    if (buf != NULL) {
+      strcat(buf, "\"");
+      strncat(buf, datum->u.str.ptr, datum->u.str.len);
+      strcat(buf, "\"");
+    }
     return datum->u.str.len + 2;
   } break;
   case TOML_INT64: {
     char intbuf[512];
     size_t intbuf_len = snprintf(intbuf, 512, "%ld", datum->u.int64);
-    strcat(buf, intbuf);
+    if (buf != NULL) {
+      strcat(buf, intbuf);
+    }
     return intbuf_len;
   } break;
   case TOML_FP64: {
     char fpbuf[512];
     size_t fpbuf_len = snprintf(fpbuf, 512, "%f", datum->u.fp64);
-    strcat(buf, fpbuf);
+    if (buf != NULL) {
+      strcat(buf, fpbuf);
+    }
     return fpbuf_len;
   } break;
   case TOML_BOOLEAN: {
-    strcat(buf, datum->u.boolean ? "true" : "false");
+    if (buf != NULL) {
+      strcat(buf, datum->u.boolean ? "true" : "false");
+    }
     return datum->u.boolean ? 4 : 5;
   } break;
   case TOML_TABLE: {
@@ -3036,7 +3056,8 @@ size_t toml_print(toml_datum_t *datum, char *buf) {
     return 0;
   }
 
-  buf[0] = '\0';
+  if (buf != NULL)
+    buf[0] = '\0';
 
   return toml_tab_print(datum, buf, false);
 }

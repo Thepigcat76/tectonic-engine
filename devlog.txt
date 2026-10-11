@@ -31,3 +31,17 @@ The actual game logic is mostly up to the user, whether you use an ECS, a more t
 ## Started working on lanuage manager
 
 ## Started working on resource files using toml
+
+-------
+
+## Finished keybinds and toml stuff
+
+## Implement more asset loading
+
+## Implemented recursive parsing for nested toml tables
+
+---------
+
+## Cameras
+
+## Ui
