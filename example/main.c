@@ -351,7 +351,7 @@ typedef struct {
 
 static bool system_client_packets(tt_entity_manager_t *entities) {
   tt_packet_t packet;
-  while (ttec_packet_pop(&entities->cengine, &packet, entities)) {
+  while (ttec_packet_pop(&entities->cengine, &packet, NULL, entities)) {
     switch ((mygame_packet_id_e)packet.packet_id) {
     case MYGAME_PACKET_PING: {
     } break;
