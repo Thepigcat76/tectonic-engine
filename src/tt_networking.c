@@ -1,3 +1,4 @@
+#include <lilc/dynstr.h>
 #include <lilc/log.h>
 #define LILSOCKETS_IMPL
 #include "../include/tt_engine.h"
@@ -91,7 +92,7 @@ usz tt_byte_buf_len(tt_byte_buf_t *byte_buf) {
 
 void tt_encode_packet(const tt_packet_t *packet, tt_packet_info_t info,
                       tt_byte_buf_t *buf, void *encode_ctx) {
-  tt_encode_i32(info.packet_handle, buf, encode_ctx);
+  tt_encode_i32(info.packet_id, buf, encode_ctx);
   info.encode_func(packet, buf, encode_ctx);
 }
 
@@ -107,7 +108,7 @@ void tt_packet_send_client(tt_engine_server_t *srvr_engine, addr_t client_addr,
   tt_byte_buf_init(&byte_buf, &srvr_engine->server.packet_alloc, 256);
 
   tt_encode_packet(&packet,
-                   srvr_engine->server.packet_infos.infos[packet.packet_handle],
+                   srvr_engine->server.packet_infos.infos[packet.packet_id],
                    &byte_buf, encode_ctx);
 
   u32 bytebuf_len = tt_byte_buf_len(&byte_buf);
@@ -133,14 +134,17 @@ void tt_packet_send_server(tt_engine_client_t *client_engine,
   tt_byte_buf_init(&byte_buf, &client_engine->client_connection.packet_alloc,
                    256);
 
-  tt_encode_packet(&packet,
-                   client_engine->client_connection.packet_infos.infos[packet.packet_handle],
-                   &byte_buf, encode_ctx);
+  tt_encode_packet(
+      &packet,
+      client_engine->client_connection.packet_infos.infos[packet.packet_id],
+      &byte_buf, encode_ctx);
 
   u32 bytebuf_len = tt_byte_buf_len(&byte_buf);
 
-  sockets_send(client_engine->client_connection.server_addr, &bytebuf_len, sizeof(u32));
-  sockets_send(client_engine->client_connection.server_addr, byte_buf.bytes, bytebuf_len);
+  sockets_send(client_engine->client_connection.server_addr, &bytebuf_len,
+               sizeof(u32));
+  sockets_send(client_engine->client_connection.server_addr, byte_buf.bytes,
+               bytebuf_len);
   pthread_rwlock_unlock(&client_engine->client_connection.connection_rwlock);
 }
 
@@ -179,26 +183,63 @@ static i64 tt_decode_num(u64 num_size, tt_byte_buf_t *buf, void *encode_ctx) {
   return val;
 }
 
-void tt_encode_i64(i64 val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+void tt_encode_i64(i64 val, tt_byte_buf_t *buf, void *ctx) {
   tt_encode_num(val, sizeof(i64), buf, ctx);
 }
 
-i64 tt_decode_i64(tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+i64 tt_decode_i64(tt_byte_buf_t *buf, void *ctx) {
   return tt_decode_num(sizeof(i64), buf, ctx);
 }
 
-void tt_encode_i32(i32 val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+void tt_encode_i32(i32 val, tt_byte_buf_t *buf, void *ctx) {
   tt_encode_num(val, sizeof(i32), buf, ctx);
 }
 
-i32 tt_decode_i32(tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+i32 tt_decode_i32(tt_byte_buf_t *buf, void *ctx) {
   return tt_decode_num(sizeof(i32), buf, ctx);
 }
 
-void tt_encode_i16(i16 val, tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+void tt_encode_i16(i16 val, tt_byte_buf_t *buf, void *ctx) {
   tt_encode_num(val, sizeof(i16), buf, ctx);
 }
 
-i16 tt_decode_i16(tt_byte_buf_t *buf, tt_packet_context_t ctx) {
+i16 tt_decode_i16(tt_byte_buf_t *buf, void *ctx) {
   return tt_decode_num(sizeof(i16), buf, ctx);
+}
+
+void tt_encode_string(const char *string, tt_byte_buf_t *buf,
+                      void *encode_ctx) {
+  usz len = strlen(string);
+  tt_encode_i64(len, buf, encode_ctx);
+
+  for (usz i = 0; i < len; ++i) {
+    tt_byte_buf_write(buf, string[i]);
+  }
+}
+
+// TODO: Make this safe, so we dont just allocate an arbitrary number of bytes
+void tt_decode_string(char **string, allocator_t *alloc, tt_byte_buf_t *buf,
+                      void *decode_ctx) {
+  usz len = tt_decode_i64(buf, decode_ctx);
+  *string = alloc->alloc(alloc, len + 1);
+
+  for (usz i = 0; i < len; ++i) {
+    (*string)[i] = tt_byte_buf_read(buf);
+  }
+
+  (*string)[len] = '\0';
+}
+
+void tt_encode_dynstr(const dyn_string_t *str, tt_byte_buf_t *buf,
+                      void *encode_ctx) {
+  tt_encode_string(str->string, buf, encode_ctx);
+}
+
+void tt_decode_dynstr(dyn_string_t *str, tt_byte_buf_t *buf, void *decode_ctx) {
+  usz len = tt_decode_i64(buf, decode_ctx);
+  dyn_string_ensure_size(str, len + 1);
+
+  for (usz i = 0; i < len; ++i) {
+    dyn_string_add_char(str, tt_byte_buf_read(buf));
+  }
 }

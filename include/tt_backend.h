@@ -282,6 +282,12 @@ typedef enum ttb_render_cmd_id ttb_render_cmd_id_t;
 
 typedef union ttb_render_cmd_data ttb_render_cmd_data_t;
 
+f64 ttb_frame_time(tt_backend_t *backend);
+
+i32 ttb_screen_to_cam_x(tt_backend_t *backend, i32 x, const tt_camera_t *cam);
+
+i32 ttb_screen_to_cam_y(tt_backend_t *backend, i32 y, const tt_camera_t *cam);
+
 u32 ttb_text_width(tt_backend_t *backend, const char *text, usz font_size);
 
 void ttb_render(tt_backend_t *backend, ttb_render_cmd_t render_cmd);

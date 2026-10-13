@@ -45,37 +45,36 @@ void ttes_server_stop(tt_engine_server_t *engine) {
 }
 
 extern bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,
-                                tt_byte_buf_t *packet_queue,
+                                tt_packet_queue_t packet_queue,
                                 pthread_mutex_t *packet_queue_mutex,
                                 tt_packet_t *out_packet,
+                                tt_packet_context_t *out_context,
                                 allocator_t *packet_alloc, void *decode_ctx);
 
 void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
-                      tt_packet_handle_t packet_handle, void *payload) {
-  tt_packet_info_t packet_info =
-      engine->server.packet_infos.infos[packet_handle];
+                      tt_packet_id_t packet_id, void *payload) {
+  tt_packet_info_t packet_info = engine->server.packet_infos.infos[packet_id];
 
-  packet->packet_handle = packet_handle;
   packet->packet_id = packet_info.packet_id;
 
   pthread_rwlock_wrlock(&engine->server.server_lock);
   packet->payload = engine->server.packet_alloc.alloc(
       &engine->server.packet_alloc, packet_info.payload_size);
+  memcpy(packet->payload, payload, packet_info.payload_size);
   pthread_rwlock_unlock(&engine->server.server_lock);
 }
 
 bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
-                     void *decode_ctx) {
-  return tt_packet_queue_pop(&engine->server.packet_infos,
-                             engine->server.packet_data_queue,
-                             &engine->server.packet_queue_mutex, packet,
-                             &engine->server.packet_alloc, decode_ctx);
+                     tt_packet_context_t *packet_ctx, void *decode_ctx) {
+  return tt_packet_queue_pop(
+      &engine->server.packet_infos, engine->server.packet_data_queue,
+      &engine->server.packet_queue_mutex, packet, packet_ctx,
+      &engine->server.packet_alloc, decode_ctx);
 }
 
-extern bool tt_handle_connection(addr_t recv_addr,
-                                 allocator_t *packet_alloc,
+extern bool tt_handle_connection(addr_t recv_addr, allocator_t *packet_alloc,
                                  pthread_mutex_t *packet_queue_mutex,
-                                 tt_byte_buf_t **packet_data_queue);
+                                 tt_packet_queue_t *packet_data_queue);
 
 // Server rwlock already locked
 static bool tt_server_handle_client_connection(tt_server_t *server,
@@ -83,7 +82,8 @@ static bool tt_server_handle_client_connection(tt_server_t *server,
   addr_t client_addr = server->connected_clients[client_id].address;
 
   return tt_handle_connection(client_addr, &server->packet_alloc,
-      &server->packet_queue_mutex, &server->packet_data_queue);
+                              &server->packet_queue_mutex,
+                              &server->packet_data_queue);
 }
 
 static void *ttes_packet_receiver_run(void *arg) {

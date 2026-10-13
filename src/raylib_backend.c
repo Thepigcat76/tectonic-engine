@@ -146,6 +146,30 @@ void ttb_events_poll(tt_backend_t *backend) {
   
 }
 
+static void ttb_camera_copy(Camera2D *rl_cam, const tt_camera_t *cam) {
+  rl_cam->offset.x = cam->offset_x;
+  rl_cam->offset.y = cam->offset_y;
+  rl_cam->target.x = cam->target_x;
+  rl_cam->target.y = cam->target_y;
+  rl_cam->rotation = cam->rotation;
+  rl_cam->zoom = cam->zoom;
+}
+
+i32 ttb_screen_to_cam_x(tt_backend_t *backend, i32 x, const tt_camera_t *cam) {
+  Camera2D rl_cam;
+  ttb_camera_copy(&rl_cam, cam);
+  return GetScreenToWorld2D((Vector2){.x = x}, rl_cam).x;
+}
+
+i32 ttb_screen_to_cam_y(tt_backend_t *backend, i32 y, const tt_camera_t *cam) {
+  Camera2D rl_cam;
+  ttb_camera_copy(&rl_cam, cam);
+  return GetScreenToWorld2D((Vector2){.y = y}, rl_cam).y;}
+
+f64 ttb_frame_time(tt_backend_t *backend) {
+  return GetFrameTime();
+}
+
 bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key) {
   (void)backend;
   return IsKeyDown(rl_key_from_ttb(key));
@@ -362,15 +386,6 @@ bool ttb_camera_make_id(tt_backend_t *backend, u64 *cam_id) {
   *cam_id = backend->cameras_amount++;
   
   return true;
-}
-
-static void ttb_camera_copy(Camera2D *rl_cam, const tt_camera_t *cam) {
-  rl_cam->offset.x = cam->offset_x;
-  rl_cam->offset.y = cam->offset_y;
-  rl_cam->target.x = cam->target_x;
-  rl_cam->target.y = cam->target_y;
-  rl_cam->rotation = cam->rotation;
-  rl_cam->zoom = cam->zoom;
 }
 
 void _ttb_cmds_render(tt_backend_t *backend) {

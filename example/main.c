@@ -2,6 +2,7 @@
 #include "../include/tt_camera.h"
 #include "../include/tt_data.h"
 #include "../include/tt_engine.h"
+#include "../include/tt_math.h"
 #include "../include/tt_translation.h"
 #include "../include/tt_ui.h"
 #include "lilc/alloc.h"
@@ -10,6 +11,7 @@
 #include "lilc/log.h"
 #include "lilc/numbers.h"
 
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,10 +23,11 @@ typedef u64 tt_entity_t;
 #define MAX_ENTITIES_AMOUNT 4000
 
 struct tt_entity_manager {
-  component_pos_t positions[MAX_ENTITIES_AMOUNT];
-  component_texture_t textures[MAX_ENTITIES_AMOUNT];
-  component_box_t boxs[MAX_ENTITIES_AMOUNT];
-  component_entity_kind_t entity_kinds[MAX_ENTITIES_AMOUNT];
+  component_pos_t c_position[MAX_ENTITIES_AMOUNT];
+  component_texture_t c_texture[MAX_ENTITIES_AMOUNT];
+  component_box_t c_box[MAX_ENTITIES_AMOUNT];
+  component_entity_kind_t c_entity_kind[MAX_ENTITIES_AMOUNT];
+  component_velocity_t c_velocity[MAX_ENTITIES_AMOUNT];
 
   tt_entity_t player_handle;
 
@@ -37,18 +40,51 @@ struct tt_entity_manager {
 
   tt_engine_client_t cengine;
   tt_engine_server_t sengine;
+
+  // For allocating info on the server
+  // about the connected clients
+  bump_t server_client_info_bump;
+  allocator_t server_client_info_alloc;
 };
 
-static i32 player_x(tt_entity_manager_t *entities) {
-  if (entities->positions[entities->player_handle].present) {
-    return entities->positions[entities->player_handle].x;
+static f32 entity_x(tt_entity_manager_t *entities, tt_entity_t entity) {
+  if (entities->c_position[entity].present) {
+    return entities->c_position[entity].x;
   }
   return 0;
 }
 
-static i32 player_y(tt_entity_manager_t *entities) {
-  if (entities->positions[entities->player_handle].present) {
-    return entities->positions[entities->player_handle].y;
+static f32 entity_y(tt_entity_manager_t *entities, tt_entity_t entity) {
+  if (entities->c_position[entity].present) {
+    return entities->c_position[entity].y;
+  }
+  return 0;
+}
+
+static f32 player_x(tt_entity_manager_t *entities) {
+  if (entities->c_position[entities->player_handle].present) {
+    return entities->c_position[entities->player_handle].x;
+  }
+  return 0;
+}
+
+static f32 player_y(tt_entity_manager_t *entities) {
+  if (entities->c_position[entities->player_handle].present) {
+    return entities->c_position[entities->player_handle].y;
+  }
+  return 0;
+}
+
+static f32 entity_vel_x(tt_entity_manager_t *entities, tt_entity_t entity) {
+  if (entities->c_velocity[entity].present) {
+    return entities->c_velocity[entity].x_velocity;
+  }
+  return 0;
+}
+
+static f32 entity_vel_y(tt_entity_manager_t *entities, tt_entity_t entity) {
+  if (entities->c_velocity[entity].present) {
+    return entities->c_velocity[entity].y_velocity;
   }
   return 0;
 }
@@ -57,9 +93,9 @@ static i32 player_y(tt_entity_manager_t *entities) {
 
 #define set_component(entities_ptr, entity, comp, ...)                         \
   do {                                                                         \
-    __VA_OPT__((entities_ptr)->comp##s[entity] =                               \
-                   (typeof(*((entities_ptr)->comp##s)))_F __VA_ARGS__;)        \
-    (entities_ptr)->comp##s[entity].present = true;                            \
+    __VA_OPT__((entities_ptr)->c_##comp[entity] =                              \
+                   (typeof(*((entities_ptr)->c_##comp)))_F __VA_ARGS__;)       \
+    (entities_ptr)->c_##comp[entity].present = true;                           \
   } while (0)
 
 static tt_asset_id_t player_tex;
@@ -75,12 +111,12 @@ tt_entity_t tt_entity_make(tt_entity_manager_t *entities) {
 }
 
 static void entity_render(tt_entity_manager_t *entities, tt_entity_t entity) {
-  component_pos_t entity_pos = entities->positions[entity];
+  component_pos_t entity_pos = entities->c_position[entity];
   if (!entity_pos.present) {
     return;
   }
 
-  component_texture_t entity_tex = entities->textures[entity];
+  component_texture_t entity_tex = entities->c_texture[entity];
   if (!entity_tex.present) {
     return;
   }
@@ -111,15 +147,15 @@ static void entities_render(tt_entity_manager_t *entities,
   for (tt_entity_t entity = 0; entity < entities->entities_amount; entity++) {
     if (entity == entities->player_handle)
       continue;
-    if (!entities->positions[entity].present)
+    if (!entities->c_position[entity].present)
       continue;
 
-    bool entity_has_box = entities->boxs[entity].present;
-    component_box_t entity_box = entities->boxs[entity];
+    bool entity_has_box = entities->c_box[entity].present;
+    component_box_t entity_box = entities->c_box[entity];
 
     bool before_player =
         entity_has_box && layer == RENDER_LAYER_BEFORE_PLAYER &&
-        entities->positions[entity].y + entity_box.height + entity_box.depth >=
+        entities->c_position[entity].y + entity_box.height + entity_box.depth >=
             player_y(entities) + 16;
     bool behind_player =
         entity_has_box && layer == RENDER_LAYER_BEHIND_PLAYER && !before_player;
@@ -135,27 +171,114 @@ static void system_render(tt_entity_manager_t *entities) {
   entities_render(entities, RENDER_LAYER_BEFORE_PLAYER);
 }
 
+static bool entity_collides(const tt_entity_manager_t *entities,
+                            tt_entity_t entity0, tt_entity_t entity1) {
+  component_pos_t pos0 = entities->c_position[entity0];
+  component_pos_t pos1 = entities->c_position[entity1];
+
+  component_box_t box0 = entities->c_box[entity0];
+  component_box_t box1 = entities->c_box[entity1];
+
+  return tt_collides(pos0.x, pos0.y + box0.height, box0.width, box0.depth,
+                     pos1.x, pos1.y + box1.height, box1.width, box1.depth);
+}
+
+static void system_velocity(tt_entity_manager_t *entities) {
+  f64 frame_time = ttb_frame_time(entities->cengine.backend);
+  for (tt_entity_t entity_id = 0; entity_id < entities->entities_amount;
+       entity_id++) {
+    if (!entities->c_velocity[entity_id].present ||
+        !entities->c_position[entity_id].present)
+      continue;
+
+    component_pos_t *entity_pos = &entities->c_position[entity_id];
+    component_velocity_t *entity_vel = &entities->c_velocity[entity_id];
+    component_box_t entity_box = entities->c_box[entity_id];
+
+    // Apply x-movement and collision checking
+    entity_pos->x += entity_vel->x_velocity * frame_time;
+    if (entity_box.present) {
+      for (tt_entity_t collision_entity = 0;
+           collision_entity < entities->entities_amount; collision_entity++) {
+        component_box_t collision_box = entities->c_box[collision_entity];
+        if (entity_id == collision_entity || !collision_box.present ||
+            !entities->c_position[collision_entity].present)
+          continue;
+
+        if (entity_collides(entities, entity_id, collision_entity)) {
+          log_debug("Colliding with: %zu", entity_id);
+          if (entity_vel->x_velocity < 0) {
+            entity_pos->x =
+                entity_x(entities, collision_entity) + collision_box.width;
+          } else if (entity_vel->x_velocity > 0) {
+            entity_pos->x =
+                entity_x(entities, collision_entity) - entity_box.width;
+          }
+          entity_vel->x_velocity = 0;
+        }
+      }
+    }
+
+    // Apply y-movement and collision checking
+    entity_pos->y += entity_vel->y_velocity * frame_time;
+    if (entity_box.present) {
+      for (tt_entity_t collision_entity = 0;
+           collision_entity < entities->entities_amount; collision_entity++) {
+        component_box_t collision_box = entities->c_box[collision_entity];
+        if (entity_id == collision_entity || !collision_box.present ||
+            !entities->c_position[collision_entity].present)
+          continue;
+
+        if (entity_collides(entities, entity_id, collision_entity)) {
+          log_debug("Colliding with: %zu", entity_id);
+          if (entity_vel->y_velocity < 0) {
+            entity_pos->y = entity_y(entities, collision_entity) +
+                            collision_box.height + collision_box.depth -
+                            entity_box.height;
+          } else if (entity_vel->y_velocity > 0) {
+            entity_pos->y = entity_y(entities, collision_entity) +
+                            collision_box.height - entity_box.height -
+                            entity_box.depth;
+          }
+          entity_vel->y_velocity = 0;
+        }
+      }
+    }
+  }
+}
+
+#define PLAYER_SPEED 100.0f
+
 static bool system_input(tt_entity_manager_t *entities) {
+  f32 dx = 0, dy = 0;
 
   if (ttec_key_down(&entities->cengine, &entities->keymap, move_forward_key)) {
-    set_component(entities, entities->player_handle, position,
-                  (.x = player_x(entities), .y = player_y(entities) - 1));
+    dy -= 1;
   }
 
   if (ttec_key_down(&entities->cengine, &entities->keymap, move_backward_key)) {
-    set_component(entities, entities->player_handle, position,
-                  (.x = player_x(entities), .y = player_y(entities) + 1));
+    dy += 1;
   }
 
   if (ttec_key_down(&entities->cengine, &entities->keymap, move_left_key)) {
-    set_component(entities, entities->player_handle, position,
-                  (.x = player_x(entities) - 1, .y = player_y(entities)));
+    dx -= 1;
   }
 
   if (ttec_key_down(&entities->cengine, &entities->keymap, move_right_key)) {
-    set_component(entities, entities->player_handle, position,
-                  (.x = player_x(entities) + 1, .y = player_y(entities)));
+    dx += 1;
   }
+
+  f32 len = sqrtf(dx * dx + dy * dy);
+
+  if (len > 0.0f) {
+    dx /= len;
+    dy /= len;
+  }
+
+  set_component(
+      entities, entities->player_handle, velocity,
+      (.x_velocity = dx * PLAYER_SPEED, .y_velocity = dy * PLAYER_SPEED));
+
   return true;
 }
 
@@ -169,12 +292,22 @@ static bool system_events(tt_entity_manager_t *entities) {
       return false;
     } break;
     case TTB_EVENT_MOUSE_INPUT: {
-      tt_entity_t crate_entity = tt_entity_make(entities);
-      set_component(entities, crate_entity, position,
-                    (.x = player_x(entities), .y = player_y(entities)));
-      set_component(entities, crate_entity, texture, (.texture = crate_tex));
-      set_component(entities, crate_entity, box,
-                    (.width = 24, .height = 14, .depth = 10));
+      if (event.event_data.evt_mouse_input.left_button ==
+          TTB_KEY_STATE_PRESSED) {
+        tt_entity_t crate_entity = tt_entity_make(entities);
+        set_component(
+            entities, crate_entity, position,
+            (.x = ttb_screen_to_cam_x(entities->cengine.backend,
+                                      ttb_mouse_x(entities->cengine.backend),
+                                      &entities->camera),
+             .y = ttb_screen_to_cam_y(entities->cengine.backend,
+                                      ttb_mouse_y(entities->cengine.backend),
+                                      &entities->camera)));
+        set_component(entities, crate_entity, texture, (.texture = crate_tex));
+        set_component(entities, crate_entity, box,
+                      (.width = 24, .height = 14, .depth = 10));
+        log_debug("Spawned crate");
+      }
     } break;
     case TTB_EVENT_KEYBOARD_INPUT: {
       tt_keymap_handle_input_event(&entities->cengine, &entities->keymap,
@@ -188,10 +321,47 @@ static bool system_events(tt_entity_manager_t *entities) {
   return true;
 }
 
+typedef enum {
+  MYGAME_PACKET_PING,
+  MYGAME_PACKET_HANDSHAKE_REQ,
+  MYGAME_PACKET_HANDSHAKE_ACCEPT,
+  MYGAME_PACKET_HANDSHAKE_REJECT,
+} mygame_packet_id_e;
+
+typedef struct {
+  u64 time;
+} mygame_packet_ping_t;
+
+typedef struct {
+  u64 protocol_version;
+  char *player_name;
+} mygame_packet_handshake_req_t;
+
+typedef struct {
+  u64 reject_reason;
+} mygame_packet_handshake_reject_t;
+
+typedef struct {
+  u64 client_id;
+} mygame_packet_handshake_accept_t;
+
+typedef struct {
+
+} mygame_packet_sync_entities_t;
+
 static bool system_client_packets(tt_entity_manager_t *entities) {
   tt_packet_t packet;
   while (ttec_packet_pop(&entities->cengine, &packet, entities)) {
-    switch (packet.packet_id) {}
+    switch ((mygame_packet_id_e)packet.packet_id) {
+    case MYGAME_PACKET_PING: {
+    } break;
+    case MYGAME_PACKET_HANDSHAKE_REQ: {
+    } break;
+    case MYGAME_PACKET_HANDSHAKE_ACCEPT: {
+    } break;
+    case MYGAME_PACKET_HANDSHAKE_REJECT: {
+    } break;
+    }
   }
 
   return true;
@@ -209,15 +379,6 @@ i32 main(i32 argc, char **argv) {
   }
 }
 
-typedef enum {
-  MYGAME_PACKET_PING,
-  MYGAME_PACKET_HANDSHAKE,
-} mygame_packet_id_e;
-
-typedef struct {
-  u64 time;
-} mygame_packet_ping_t;
-
 static void mygame_packet_ping_encode(const tt_packet_t *packet,
                                       tt_byte_buf_t *buf, void *encode_ctx) {
   mygame_packet_ping_t *ping_packet = packet->payload;
@@ -229,6 +390,52 @@ static void mygame_packet_ping_decode(tt_packet_t *packet, tt_byte_buf_t *buf,
   ping_packet->time = tt_decode_i64(buf, decode_ctx);
 }
 
+static void mygame_packet_handshake_req_encode(const tt_packet_t *packet,
+                                               tt_byte_buf_t *buf,
+                                               void *encode_ctx) {
+  mygame_packet_handshake_req_t *payload = packet->payload;
+  tt_encode_i64(payload->protocol_version, buf, encode_ctx);
+  tt_encode_string(payload->player_name, buf, encode_ctx);
+}
+
+static void mygame_packet_handshake_req_decode(tt_packet_t *packet,
+                                               tt_byte_buf_t *buf,
+                                               void *decode_ctx) {
+  tt_entity_manager_t *entities = decode_ctx;
+  mygame_packet_handshake_req_t *payload = packet->payload;
+  payload->protocol_version = tt_decode_i64(buf, decode_ctx);
+  tt_decode_string(&payload->player_name, &entities->server_client_info_alloc,
+                   buf, decode_ctx);
+}
+
+static void mygame_packet_handshake_accept_encode(const tt_packet_t *packet,
+                                                  tt_byte_buf_t *buf,
+                                                  void *encode_ctx) {
+  mygame_packet_handshake_accept_t *payload = packet->payload;
+  tt_encode_i64(payload->client_id, buf, encode_ctx);
+}
+
+static void mygame_packet_handshake_accept_decode(tt_packet_t *packet,
+                                                  tt_byte_buf_t *buf,
+                                                  void *decode_ctx) {
+  mygame_packet_handshake_accept_t *payload = packet->payload;
+  payload->client_id = tt_decode_i64(buf, decode_ctx);
+}
+
+static void mygame_packet_handshake_reject_encode(const tt_packet_t *packet,
+                                                  tt_byte_buf_t *buf,
+                                                  void *encode_ctx) {
+  mygame_packet_handshake_reject_t *payload = packet->payload;
+  tt_encode_i64(payload->reject_reason, buf, encode_ctx);
+}
+
+static void mygame_packet_handshake_reject_decode(tt_packet_t *packet,
+                                                  tt_byte_buf_t *buf,
+                                                  void *decode_ctx) {
+  mygame_packet_handshake_reject_t *payload = packet->payload;
+  payload->reject_reason = tt_decode_i64(buf, decode_ctx);
+}
+
 static tt_packet_info_t mygame_packet_infos[] = {
     [MYGAME_PACKET_PING] =
         {
@@ -238,24 +445,45 @@ static tt_packet_info_t mygame_packet_infos[] = {
             .encode_func = mygame_packet_ping_encode,
             .decode_func = mygame_packet_ping_decode,
         },
-    [MYGAME_PACKET_HANDSHAKE] =
+    [MYGAME_PACKET_HANDSHAKE_REQ] =
         {
-            .packet_id = MYGAME_PACKET_PING,
+            .packet_id = MYGAME_PACKET_HANDSHAKE_REQ,
+            .packet_dir = TT_PACKET_DIR_SERVER,
+            .payload_size = sizeof(mygame_packet_handshake_req_t),
+            .encode_func = mygame_packet_handshake_req_encode,
+            .decode_func = mygame_packet_handshake_req_decode,
+        },
+    [MYGAME_PACKET_HANDSHAKE_ACCEPT] =
+        {
+            .packet_id = MYGAME_PACKET_HANDSHAKE_ACCEPT,
             .packet_dir = TT_PACKET_DIR_CLIENT,
-            .payload_size = 0,
-            .encode_func = NULL,
-            .decode_func = NULL,
+            .payload_size = sizeof(mygame_packet_handshake_accept_t),
+            .encode_func = mygame_packet_handshake_accept_encode,
+            .decode_func = mygame_packet_handshake_accept_decode,
+        },
+    [MYGAME_PACKET_HANDSHAKE_REJECT] =
+        {
+            .packet_id = MYGAME_PACKET_HANDSHAKE_REJECT,
+            .packet_dir = TT_PACKET_DIR_CLIENT,
+            .payload_size = sizeof(mygame_packet_handshake_reject_t),
+            .encode_func = mygame_packet_handshake_reject_encode,
+            .decode_func = mygame_packet_handshake_reject_decode,
         },
 };
 
 static void packets_add(tt_packet_info_array_t *packet_infos) {
-  tt_packet_info_add(packet_infos, MYGAME_PACKET_PING,
-                     mygame_packet_infos[MYGAME_PACKET_PING]);
-  tt_packet_info_add(packet_infos, MYGAME_PACKET_HANDSHAKE,
-                     mygame_packet_infos[MYGAME_PACKET_HANDSHAKE]);
+  tt_packet_info_add(packet_infos, mygame_packet_infos[MYGAME_PACKET_PING]);
+  tt_packet_info_add(packet_infos,
+                     mygame_packet_infos[MYGAME_PACKET_HANDSHAKE_REQ]);
+  tt_packet_info_add(packet_infos,
+                     mygame_packet_infos[MYGAME_PACKET_HANDSHAKE_ACCEPT]);
+  tt_packet_info_add(packet_infos,
+                     mygame_packet_infos[MYGAME_PACKET_HANDSHAKE_REJECT]);
 
   tt_packet_info_lock(packet_infos);
 }
+
+#define PROTOCOL_VERSION 0x0000000000000001
 
 static i32 server_run(void) {
   tt_entity_manager_t entity_manager = {.sengine = {0}};
@@ -280,6 +508,39 @@ static i32 server_run(void) {
   bool running = true;
 
   while (running) {
+    tt_packet_context_t packet_ctx;
+    tt_packet_t packet;
+    if (ttes_packet_pop(&entity_manager.sengine, &packet, &packet_ctx, &entity_manager)) {
+      switch ((mygame_packet_id_e)packet.packet_id) {
+      case MYGAME_PACKET_PING: {
+      } break;
+      case MYGAME_PACKET_HANDSHAKE_REQ: {
+        mygame_packet_handshake_req_t *payload = packet.payload;
+        if (payload->protocol_version != PROTOCOL_VERSION) {
+          log_warn("Client with invalid protocol version %zu attempted to connect", payload->protocol_version);
+
+          tt_packet_t reject_packet = {0};
+          mygame_packet_handshake_reject_t reject_payload = {.reject_reason = 0};
+          ttes_packet_init(&entity_manager.sengine, &reject_packet, MYGAME_PACKET_HANDSHAKE_REJECT, &reject_payload);
+
+          tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender, reject_packet, &entity_manager);
+        } else {
+          log_info("Accepted Client %s", payload->player_name);
+
+          tt_packet_t accept_packet = {0};
+          mygame_packet_handshake_accept_t accept_payload = {.client_id = 0};
+          ttes_packet_init(&entity_manager.sengine, &accept_packet, MYGAME_PACKET_HANDSHAKE_ACCEPT, &accept_payload);
+
+          tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender, accept_packet, &entity_manager);
+        }
+      } break;
+      case MYGAME_PACKET_HANDSHAKE_ACCEPT: {
+      } break;
+      case MYGAME_PACKET_HANDSHAKE_REJECT: {
+      } break;
+      }
+    }
+
     if (running) {
       running = ttes_update(&entity_manager.sengine);
     } else {
@@ -301,6 +562,10 @@ static void entity_manager_init(tt_entity_manager_t *entity_manager) {
 
   tt_camera_init(&entity_manager->camera, entity_manager->cengine.backend);
   entity_manager->camera.zoom = 4;
+
+  bump_init(&entity_manager->server_client_info_bump, 4800);
+  bump_allocator_init(&entity_manager->server_client_info_alloc,
+                      &entity_manager->server_client_info_bump);
 }
 
 static void entity_manager_deinit(tt_entity_manager_t *entity_manager) {
@@ -404,18 +669,18 @@ static i32 client_run(void) {
   player_tex = tt_asset_bind(assets, "tex/player.png");
   crate_tex = tt_asset_bind(assets, "tex/crate.png");
 
-  tt_entity_t player = tt_entity_make(&entity_manager);
+  tt_entity_t _player = tt_entity_make(&entity_manager);
+  set_component(&entity_manager, _player, position, (.x = 0, .y = 0));
+  set_component(&entity_manager, _player, box,
+                (.width = 8, .height = 12, .depth = 4));
+  set_component(&entity_manager, _player, texture, (.texture = player_tex));
 
-  entity_manager.player_handle = player;
-
-  set_component(&entity_manager, player, texture, (.texture = player_tex));
+  entity_manager.player_handle = _player;
 
   bool running = true;
 
   i32 connection_retry_timer = 0;
   bool initial_connection = false;
-
-  set_component(&entity_manager, player, position, (.x = 0, .y = 0));
 
   while (running) {
     if (!initial_connection && connection_retry_timer <= 0) {
@@ -426,6 +691,16 @@ static i32 client_run(void) {
       } else {
         log_info("Connected to server!");
         initial_connection = true;
+
+        mygame_packet_handshake_req_t payload = {
+            .protocol_version = PROTOCOL_VERSION, .player_name = "Dev"};
+        tt_packet_t handshake_req = {0};
+        ttec_packet_init(&entity_manager.cengine, &handshake_req,
+                         MYGAME_PACKET_HANDSHAKE_REQ, &payload);
+
+        tt_packet_send_server(&entity_manager.cengine, handshake_req,
+                              &entity_manager);
+        log_info("[CLIENT] Requested handshake from server");
       }
     }
 
@@ -441,7 +716,9 @@ static i32 client_run(void) {
     if (running)
       running = input_res;
 
-    if (entity_manager.positions[entity_manager.player_handle].present) {
+    system_velocity(&entity_manager);
+
+    if (entity_manager.c_position[entity_manager.player_handle].present) {
       entity_manager.camera.target_x = player_x(&entity_manager);
       entity_manager.camera.target_y = player_y(&entity_manager);
     } else {

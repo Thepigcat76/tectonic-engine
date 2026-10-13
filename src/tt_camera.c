@@ -2,7 +2,6 @@
 #include "../include/tt_backend.h"
 
 #include "lilc/log.h"
-#include "lilc/alloc.h"
 
 void tt_camera_init(tt_camera_t *cam, tt_backend_t *backend) {
   cam->zoom = 1;

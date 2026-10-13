@@ -3,10 +3,10 @@
 #include "lilc/alloc.h"
 #include "lilc/array.h"
 #include "lilc/bump.h"
+#include "lilc/deque.h"
 #include "lilsockets.h"
 #include "tt_assets.h"
 #include "tt_keys.h"
-#include "lilc/deque.h"
 #include "tt_packets.h"
 #include "tt_shared.h"
 #include <pthread.h>
@@ -60,7 +60,7 @@ struct tt_server {
 
   array_t(tt_client_desc_t) connected_clients;
 
-  deque_t(tt_byte_buf_t) packet_data_queue;
+  tt_packet_queue_t packet_data_queue;
   pthread_mutex_t packet_queue_mutex;
 
   tt_packet_info_array_t packet_infos;
@@ -90,7 +90,7 @@ struct tt_client_connection {
 
   tt_client_state_e state;
 
-  deque_t(tt_byte_buf_t) packet_data_queue;
+  tt_packet_queue_t packet_data_queue;
   pthread_mutex_t packet_queue_mutex;
 
   tt_packet_info_array_t packet_infos;
@@ -101,7 +101,6 @@ struct tt_client_connection {
 #endif
 
 void tt_packet_info_add(tt_packet_info_array_t *packet_infos,
-                        tt_packet_handle_t handle,
                         tt_packet_info_t packet_info);
 
 void tt_packet_info_lock(tt_packet_info_array_t *packet_infos);
@@ -151,10 +150,10 @@ bool ttec_update(tt_engine_client_t *engine);
 
 bool ttec_connect(tt_engine_client_t *engine, const char *ipaddr, u32 port);
 
-// void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet,
-// tt_packet_handle_t packet_handle, void *payload);
+void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet,
+                      tt_packet_id_t packet_id, void *payload);
 
-bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
+bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet, tt_packet_context_t *packet_ctx,
                      void *decode_ctx);
 
 void ttec_client_stop(tt_engine_client_t *engine);
@@ -189,11 +188,11 @@ void ttes_deinit(tt_engine_server_t *engine);
 
 bool ttes_update(tt_engine_server_t *engine);
 
-// void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
-// tt_packet_handle_t packet_handle, void *payload);
+void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
+                      tt_packet_id_t packet_id, void *payload);
 
 bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
-                     void *decode_ctx);
+                     tt_packet_context_t *packet_ctx, void *decode_ctx);
 
 bool ttes_server_host(tt_engine_server_t *engine, const char *ipaddr, u32 port);
 

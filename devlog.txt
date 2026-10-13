@@ -45,3 +45,7 @@ The actual game logic is mostly up to the user, whether you use an ECS, a more t
 ## Cameras
 
 ## Ui
+
+---------
+
+## Collisions
