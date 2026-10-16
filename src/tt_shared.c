@@ -6,6 +6,8 @@
 #include "lilc/deque.h"
 #include "lilc/log.h"
 
+#include "tt_internal_shared.h"
+
 #include <pthread.h>
 #include <time.h>
 
@@ -22,25 +24,33 @@ static void tt_packet_init(allocator_t *alloc, tt_packet_t *packet,
   packet->payload = alloc->alloc(alloc, packet_info.payload_size);
 }
 
-bool tt_handle_connection(addr_t recv_addr, allocator_t *packet_alloc,
+tt_connection_status_e tt_handle_connection(addr_t recv_addr,
                           pthread_mutex_t *packet_queue_mutex,
                           tt_packet_queue_t *packet_data_queue) {
-  u8 len_buf[8];
+  u8 len_buf[8] = {0};
   i64 len_res = sockets_receive(recv_addr, len_buf, 8);
-  if (len_res != 4) {
+  if (len_res != 8) {
+    log_error("Failed to receive packet len, received %ld bytes, but expected 8 bytes for payload length", len_res);
     return false;
   }
 
-  u32 len = (len_buf[0] << 24) | (len_buf[1] << 16) | (len_buf[2] << 8) |
-            (len_buf[3] << 0);
+  u64 len = 0;
+  memcpy(&len, len_buf, sizeof(u64));
+
+  log_debug("Len: %zu", len);
 
   tt_byte_buf_t bytebuf = {0};
-  tt_byte_buf_init(&bytebuf, packet_alloc, len);
+  tt_byte_buf_init(&bytebuf, &HEAP_ALLOCATOR, len);
 
   i64 payload_res = sockets_receive(recv_addr, bytebuf.bytes, len);
   if (payload_res == -1) {
+    log_error("Failed to receive payload");
+    tt_byte_buf_deinit(&bytebuf);
     return false;
   }
+  _internal_array_set_len(bytebuf.bytes, len);
+
+  log_debug("Bytebuf len after recv payload: %zu", len);
 
   struct tt_packet_queue_entry entry = {.packet_bytes = bytebuf,
                                         .packet_ctx.sender = recv_addr};
@@ -60,6 +70,11 @@ static bool tt_decode_packet_with_handle(tt_packet_info_array_t *packet_infos,
     log_error("Packet infos needs to be locked, before using packets");
     return false;
   }
+  if (packet_bytes == NULL) {
+    log_error("Packet bytes are null");
+    return false;
+  }
+  log_debug("Cur Packet bytes: %zu", tt_byte_buf_len(packet_bytes));
   if (tt_byte_buf_len(packet_bytes) < 4) {
     log_error("Invalid packet header");
     return false;
@@ -84,20 +99,21 @@ bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,
   bool success = false;
   pthread_mutex_lock(packet_queue_mutex);
 
-  if (deque_len(packet_queue) > 0) {
-    struct tt_packet_queue_entry **entry = deque_pop_front(packet_queue);
+  if (deque_len(*packet_queue) > 0) {
+    log_debug("Packets: %zu", deque_len(*packet_queue));
+    struct tt_packet_queue_entry *entry = deque_pop_front(*packet_queue);
     if (entry != NULL) {
       if (out_context != NULL) {
-        *out_context = (*entry)->packet_ctx;
+        *out_context = entry->packet_ctx;
       }
       success =
-          tt_decode_packet_with_handle(packet_infos, &(*entry)->packet_bytes,
+          tt_decode_packet_with_handle(packet_infos, &entry->packet_bytes,
                                        out_packet, packet_alloc, decode_ctx);
       if (!success) {
         log_error("Failed to decode packet");
       }
 
-      tt_byte_buf_deinit(&(*entry)->packet_bytes);
+      tt_byte_buf_deinit(&entry->packet_bytes);
     }
   }
 

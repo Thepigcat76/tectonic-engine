@@ -41,8 +41,8 @@ void ttui_set_config(tt_asset_manager_t *assets, ttui_config_t config);
 
 void ttui_set_config_default(tt_asset_manager_t *assets);
 
-bool ttui_button_render(tt_backend_t *backend, ttui_texture_t tex, ttui_text_t text, i32 x, i32 y, i32 width, i32 height, bool mouse_released);
+bool ttui_button(tt_backend_t *backend, ttui_text_t text, i32 x, i32 y, i32 width, i32 height, bool mouse_released);
 
-void ttui_label_render(tt_backend_t *backend, ttui_texture_t tex, ttui_text_t text, i32 x, i32 y, i32 width, i32 height);
+void ttui_label(tt_backend_t *backend, ttui_text_t text, i32 x, i32 y, i32 width, i32 height);
 
-void ttui_text_box_render(tt_backend_t *backend, ttui_texture_t tex, dyn_string_t *text_buf, i32 x, i32 y, i32 width, i32 height, bool multiline);
+void ttui_text_box(tt_backend_t *backend, dyn_string_t *text_buf, i32 x, i32 y, i32 width, i32 height, bool multiline);

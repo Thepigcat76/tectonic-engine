@@ -111,9 +111,9 @@ void tt_packet_send_client(tt_engine_server_t *srvr_engine, addr_t client_addr,
                    srvr_engine->server.packet_infos.infos[packet.packet_id],
                    &byte_buf, encode_ctx);
 
-  u32 bytebuf_len = tt_byte_buf_len(&byte_buf);
+  u64 bytebuf_len = tt_byte_buf_len(&byte_buf);
 
-  sockets_send(client_addr, &bytebuf_len, sizeof(u32));
+  sockets_send(client_addr, &bytebuf_len, sizeof(u64));
   sockets_send(client_addr, byte_buf.bytes, bytebuf_len);
   pthread_rwlock_unlock(&srvr_engine->server.server_lock);
 }
@@ -139,10 +139,10 @@ void tt_packet_send_server(tt_engine_client_t *client_engine,
       client_engine->client_connection.packet_infos.infos[packet.packet_id],
       &byte_buf, encode_ctx);
 
-  u32 bytebuf_len = tt_byte_buf_len(&byte_buf);
+  u64 bytebuf_len = tt_byte_buf_len(&byte_buf);
 
   sockets_send(client_engine->client_connection.server_addr, &bytebuf_len,
-               sizeof(u32));
+               sizeof(u64));
   sockets_send(client_engine->client_connection.server_addr, byte_buf.bytes,
                bytebuf_len);
   pthread_rwlock_unlock(&client_engine->client_connection.connection_rwlock);
@@ -156,9 +156,8 @@ static void tt_encode_num(i64 num, u64 num_size, tt_byte_buf_t *buf,
     return;
   }
 
-  const i64 val = *(i64 *)num;
   for (usz i = 1; i <= num_size; i++) {
-    tt_byte_buf_write(buf, val >> ((num_size - i) * 8));
+    tt_byte_buf_write(buf, num >> ((num_size - i) * 8));
   }
 }
 
@@ -209,6 +208,9 @@ i16 tt_decode_i16(tt_byte_buf_t *buf, void *ctx) {
 
 void tt_encode_string(const char *string, tt_byte_buf_t *buf,
                       void *encode_ctx) {
+  if (string == NULL) {
+    tt_encode_i64(0, buf, encode_ctx);
+  }
   usz len = strlen(string);
   tt_encode_i64(len, buf, encode_ctx);
 
@@ -221,13 +223,19 @@ void tt_encode_string(const char *string, tt_byte_buf_t *buf,
 void tt_decode_string(char **string, allocator_t *alloc, tt_byte_buf_t *buf,
                       void *decode_ctx) {
   usz len = tt_decode_i64(buf, decode_ctx);
-  *string = alloc->alloc(alloc, len + 1);
+  if (len == 0) return;
+
+  if (string != NULL)
+    *string = alloc->alloc(alloc, len + 1);
 
   for (usz i = 0; i < len; ++i) {
-    (*string)[i] = tt_byte_buf_read(buf);
+    u8 b = tt_byte_buf_read(buf);
+    if (string != NULL && *string != NULL)
+      (*string)[i] = b;
   }
 
-  (*string)[len] = '\0';
+  if (string != NULL && *string != NULL)
+    (*string)[len] = '\0';
 }
 
 void tt_encode_dynstr(const dyn_string_t *str, tt_byte_buf_t *buf,

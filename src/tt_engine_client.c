@@ -1,9 +1,11 @@
 #include "../include/tt_engine.h"
+#include "tt_internal_shared.h"
+
 #include "lilc/alloc.h"
 #include "lilc/array.h"
-#include "lilc/deque.h"
 #include "lilc/log.h"
-#include <lilsockets.h>
+#include "lilsockets.h"
+
 #include <pthread.h>
 #include <raylib.h>
 #include <stdio.h>
@@ -99,13 +101,6 @@ bool ttec_connect(tt_engine_client_t *engine, const char *ipaddr, u32 port) {
   return true;
 }
 
-extern bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,
-                                tt_packet_queue_t *packet_queue,
-                                pthread_mutex_t *packet_queue_mutex,
-                                tt_packet_t *out_packet,
-                                tt_packet_context_t *out_context,
-                                allocator_t *packet_alloc, void *decode_ctx);
-
 void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet,
                       tt_packet_id_t packet_id, void *payload) {
   packet->packet_id = packet_id;
@@ -121,22 +116,17 @@ void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet,
 
 bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
                      tt_packet_context_t *packet_ctx, void *decode_ctx) {
-  return tt_packet_queue_pop(&engine->client_connection.packet_infos,
-                             &engine->client_connection.packet_data_queue,
-                             &engine->client_connection.packet_queue_mutex,
-                             packet, packet_ctx, &engine->client_connection.packet_alloc,
-                             decode_ctx);
+  return tt_packet_queue_pop(
+      &engine->client_connection.packet_infos,
+      &engine->client_connection.packet_data_queue,
+      &engine->client_connection.packet_queue_mutex, packet, packet_ctx,
+      &engine->client_connection.packet_alloc, decode_ctx);
 }
-
-extern bool tt_handle_connection(addr_t recv_addr, allocator_t *packet_alloc,
-                                 pthread_mutex_t *packet_queue_mutex,
-                                 tt_packet_queue_t *packet_data_queue);
 
 // client connection rwlock is locked
 static bool ttec_packet_recv(tt_client_connection_t *connection,
                              addr_t server_addr) {
-  return tt_handle_connection(server_addr, &connection->packet_alloc,
-                              &connection->packet_queue_mutex,
+  return tt_handle_connection(server_addr, &connection->packet_queue_mutex,
                               &connection->packet_data_queue);
 }
 

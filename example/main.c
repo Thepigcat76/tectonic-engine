@@ -16,36 +16,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-typedef u64 tt_entity_t;
-
 #include "components.h"
+#include "entity_manager.h"
+#include "packets.h"
 
-#define MAX_ENTITIES_AMOUNT 4000
+static i32 client_run(void);
+static i32 server_run(void);
 
-struct tt_entity_manager {
-  component_pos_t c_position[MAX_ENTITIES_AMOUNT];
-  component_texture_t c_texture[MAX_ENTITIES_AMOUNT];
-  component_box_t c_box[MAX_ENTITIES_AMOUNT];
-  component_entity_kind_t c_entity_kind[MAX_ENTITIES_AMOUNT];
-  component_velocity_t c_velocity[MAX_ENTITIES_AMOUNT];
-
-  tt_entity_t player_handle;
-
-  tt_entity_t cur_entity_id;
-  usz entities_amount;
-
-  tt_keymap_t keymap;
-  tt_translation_manager_t translation_manager;
-  tt_camera_t camera;
-
-  tt_engine_client_t cengine;
-  tt_engine_server_t sengine;
-
-  // For allocating info on the server
-  // about the connected clients
-  bump_t server_client_info_bump;
-  allocator_t server_client_info_alloc;
-};
+i32 main(i32 argc, char **argv) {
+  if (args_contains(argc, argv, "--server", NULL)) {
+    return server_run();
+  } else {
+    return client_run();
+  }
+}
 
 static f32 entity_x(tt_entity_manager_t *entities, tt_entity_t entity) {
   if (entities->c_position[entity].present) {
@@ -89,15 +73,6 @@ static f32 entity_vel_y(tt_entity_manager_t *entities, tt_entity_t entity) {
   return 0;
 }
 
-#define _F(...) {__VA_ARGS__}
-
-#define set_component(entities_ptr, entity, comp, ...)                         \
-  do {                                                                         \
-    __VA_OPT__((entities_ptr)->c_##comp[entity] =                              \
-                   (typeof(*((entities_ptr)->c_##comp)))_F __VA_ARGS__;)       \
-    (entities_ptr)->c_##comp[entity].present = true;                           \
-  } while (0)
-
 static tt_asset_id_t player_tex;
 static tt_asset_id_t crate_tex;
 static tt_keymap_id_t move_forward_key;
@@ -139,8 +114,6 @@ typedef enum {
   RENDER_LAYER_BEFORE_PLAYER,
   RENDER_LAYER_BEHIND_PLAYER,
 } render_layer_e;
-
-#define PLAYER_DEPTH 4
 
 static void entities_render(tt_entity_manager_t *entities,
                             render_layer_e layer) {
@@ -282,6 +255,10 @@ static bool system_input(tt_entity_manager_t *entities) {
   return true;
 }
 
+static struct {
+  
+} ui_input;
+
 static bool system_events(tt_entity_manager_t *entities) {
   ttb_events_poll(entities->cengine.backend);
 
@@ -321,37 +298,10 @@ static bool system_events(tt_entity_manager_t *entities) {
   return true;
 }
 
-typedef enum {
-  MYGAME_PACKET_PING,
-  MYGAME_PACKET_HANDSHAKE_REQ,
-  MYGAME_PACKET_HANDSHAKE_ACCEPT,
-  MYGAME_PACKET_HANDSHAKE_REJECT,
-} mygame_packet_id_e;
-
-typedef struct {
-  u64 time;
-} mygame_packet_ping_t;
-
-typedef struct {
-  u64 protocol_version;
-  char *player_name;
-} mygame_packet_handshake_req_t;
-
-typedef struct {
-  u64 reject_reason;
-} mygame_packet_handshake_reject_t;
-
-typedef struct {
-  u64 client_id;
-} mygame_packet_handshake_accept_t;
-
-typedef struct {
-
-} mygame_packet_sync_entities_t;
-
 static bool system_client_packets(tt_entity_manager_t *entities) {
   tt_packet_t packet;
   while (ttec_packet_pop(&entities->cengine, &packet, NULL, entities)) {
+    log_debug("[CLIENT] Received Packet: %zu", packet.packet_id);
     switch ((mygame_packet_id_e)packet.packet_id) {
     case MYGAME_PACKET_PING: {
     } break;
@@ -367,110 +317,6 @@ static bool system_client_packets(tt_entity_manager_t *entities) {
   return true;
 }
 
-static i32 server_run(void);
-
-static i32 client_run(void);
-
-i32 main(i32 argc, char **argv) {
-  if (args_contains(argc, argv, "--server", NULL)) {
-    return server_run();
-  } else {
-    return client_run();
-  }
-}
-
-static void mygame_packet_ping_encode(const tt_packet_t *packet,
-                                      tt_byte_buf_t *buf, void *encode_ctx) {
-  mygame_packet_ping_t *ping_packet = packet->payload;
-  tt_encode_i64(ping_packet->time, buf, encode_ctx);
-}
-static void mygame_packet_ping_decode(tt_packet_t *packet, tt_byte_buf_t *buf,
-                                      void *decode_ctx) {
-  mygame_packet_ping_t *ping_packet = packet->payload;
-  ping_packet->time = tt_decode_i64(buf, decode_ctx);
-}
-
-static void mygame_packet_handshake_req_encode(const tt_packet_t *packet,
-                                               tt_byte_buf_t *buf,
-                                               void *encode_ctx) {
-  mygame_packet_handshake_req_t *payload = packet->payload;
-  tt_encode_i64(payload->protocol_version, buf, encode_ctx);
-  tt_encode_string(payload->player_name, buf, encode_ctx);
-}
-
-static void mygame_packet_handshake_req_decode(tt_packet_t *packet,
-                                               tt_byte_buf_t *buf,
-                                               void *decode_ctx) {
-  tt_entity_manager_t *entities = decode_ctx;
-  mygame_packet_handshake_req_t *payload = packet->payload;
-  payload->protocol_version = tt_decode_i64(buf, decode_ctx);
-  tt_decode_string(&payload->player_name, &entities->server_client_info_alloc,
-                   buf, decode_ctx);
-}
-
-static void mygame_packet_handshake_accept_encode(const tt_packet_t *packet,
-                                                  tt_byte_buf_t *buf,
-                                                  void *encode_ctx) {
-  mygame_packet_handshake_accept_t *payload = packet->payload;
-  tt_encode_i64(payload->client_id, buf, encode_ctx);
-}
-
-static void mygame_packet_handshake_accept_decode(tt_packet_t *packet,
-                                                  tt_byte_buf_t *buf,
-                                                  void *decode_ctx) {
-  mygame_packet_handshake_accept_t *payload = packet->payload;
-  payload->client_id = tt_decode_i64(buf, decode_ctx);
-}
-
-static void mygame_packet_handshake_reject_encode(const tt_packet_t *packet,
-                                                  tt_byte_buf_t *buf,
-                                                  void *encode_ctx) {
-  mygame_packet_handshake_reject_t *payload = packet->payload;
-  tt_encode_i64(payload->reject_reason, buf, encode_ctx);
-}
-
-static void mygame_packet_handshake_reject_decode(tt_packet_t *packet,
-                                                  tt_byte_buf_t *buf,
-                                                  void *decode_ctx) {
-  mygame_packet_handshake_reject_t *payload = packet->payload;
-  payload->reject_reason = tt_decode_i64(buf, decode_ctx);
-}
-
-static tt_packet_info_t mygame_packet_infos[] = {
-    [MYGAME_PACKET_PING] =
-        {
-            .packet_id = MYGAME_PACKET_PING,
-            .packet_dir = TT_PACKET_DIR_TWO_WAY,
-            .payload_size = sizeof(mygame_packet_ping_t),
-            .encode_func = mygame_packet_ping_encode,
-            .decode_func = mygame_packet_ping_decode,
-        },
-    [MYGAME_PACKET_HANDSHAKE_REQ] =
-        {
-            .packet_id = MYGAME_PACKET_HANDSHAKE_REQ,
-            .packet_dir = TT_PACKET_DIR_SERVER,
-            .payload_size = sizeof(mygame_packet_handshake_req_t),
-            .encode_func = mygame_packet_handshake_req_encode,
-            .decode_func = mygame_packet_handshake_req_decode,
-        },
-    [MYGAME_PACKET_HANDSHAKE_ACCEPT] =
-        {
-            .packet_id = MYGAME_PACKET_HANDSHAKE_ACCEPT,
-            .packet_dir = TT_PACKET_DIR_CLIENT,
-            .payload_size = sizeof(mygame_packet_handshake_accept_t),
-            .encode_func = mygame_packet_handshake_accept_encode,
-            .decode_func = mygame_packet_handshake_accept_decode,
-        },
-    [MYGAME_PACKET_HANDSHAKE_REJECT] =
-        {
-            .packet_id = MYGAME_PACKET_HANDSHAKE_REJECT,
-            .packet_dir = TT_PACKET_DIR_CLIENT,
-            .payload_size = sizeof(mygame_packet_handshake_reject_t),
-            .encode_func = mygame_packet_handshake_reject_encode,
-            .decode_func = mygame_packet_handshake_reject_decode,
-        },
-};
-
 static void packets_add(tt_packet_info_array_t *packet_infos) {
   tt_packet_info_add(packet_infos, mygame_packet_infos[MYGAME_PACKET_PING]);
   tt_packet_info_add(packet_infos,
@@ -483,10 +329,10 @@ static void packets_add(tt_packet_info_array_t *packet_infos) {
   tt_packet_info_lock(packet_infos);
 }
 
-#define PROTOCOL_VERSION 0x0000000000000001
-
 static i32 server_run(void) {
   tt_entity_manager_t entity_manager = {.sengine = {0}};
+
+  entity_manager_init_server(&entity_manager);
 
   ttes_init(&entity_manager.sengine, false);
 
@@ -510,28 +356,37 @@ static i32 server_run(void) {
   while (running) {
     tt_packet_context_t packet_ctx;
     tt_packet_t packet;
-    if (ttes_packet_pop(&entity_manager.sengine, &packet, &packet_ctx, &entity_manager)) {
+    if (ttes_packet_pop(&entity_manager.sengine, &packet, &packet_ctx,
+                        &entity_manager)) {
+      log_debug("[SERVER] Received Packet : %zu", packet.packet_id);
       switch ((mygame_packet_id_e)packet.packet_id) {
       case MYGAME_PACKET_PING: {
       } break;
       case MYGAME_PACKET_HANDSHAKE_REQ: {
         mygame_packet_handshake_req_t *payload = packet.payload;
         if (payload->protocol_version != PROTOCOL_VERSION) {
-          log_warn("Client with invalid protocol version %zu attempted to connect", payload->protocol_version);
+          log_warn(
+              "Client with invalid protocol version %zu attempted to connect",
+              payload->protocol_version);
 
           tt_packet_t reject_packet = {0};
-          mygame_packet_handshake_reject_t reject_payload = {.reject_reason = 0};
-          ttes_packet_init(&entity_manager.sengine, &reject_packet, MYGAME_PACKET_HANDSHAKE_REJECT, &reject_payload);
+          mygame_packet_handshake_reject_t reject_payload = {.reject_reason =
+                                                                 0};
+          ttes_packet_init(&entity_manager.sengine, &reject_packet,
+                           MYGAME_PACKET_HANDSHAKE_REJECT, &reject_payload);
 
-          tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender, reject_packet, &entity_manager);
+          tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender,
+                                reject_packet, &entity_manager);
         } else {
           log_info("Accepted Client %s", payload->player_name);
 
           tt_packet_t accept_packet = {0};
           mygame_packet_handshake_accept_t accept_payload = {.client_id = 0};
-          ttes_packet_init(&entity_manager.sengine, &accept_packet, MYGAME_PACKET_HANDSHAKE_ACCEPT, &accept_payload);
+          ttes_packet_init(&entity_manager.sengine, &accept_packet,
+                           MYGAME_PACKET_HANDSHAKE_ACCEPT, &accept_payload);
 
-          tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender, accept_packet, &entity_manager);
+          tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender,
+                                accept_packet, &entity_manager);
         }
       } break;
       case MYGAME_PACKET_HANDSHAKE_ACCEPT: {
@@ -553,24 +408,6 @@ static i32 server_run(void) {
   ttes_deinit(&entity_manager.sengine);
 
   return 0;
-}
-
-static void entity_manager_init(tt_entity_manager_t *entity_manager) {
-  tt_keymap_init(&entity_manager->keymap, &HEAP_ALLOCATOR);
-  tt_translation_manager_init(&entity_manager->translation_manager, "en_us",
-                              &HEAP_ALLOCATOR);
-
-  tt_camera_init(&entity_manager->camera, entity_manager->cengine.backend);
-  entity_manager->camera.zoom = 4;
-
-  bump_init(&entity_manager->server_client_info_bump, 4800);
-  bump_allocator_init(&entity_manager->server_client_info_alloc,
-                      &entity_manager->server_client_info_bump);
-}
-
-static void entity_manager_deinit(tt_entity_manager_t *entity_manager) {
-  tt_keymap_deinit(&entity_manager->keymap);
-  tt_translation_manager_deinit(&entity_manager->translation_manager);
 }
 
 static void keybinds_setup(tt_entity_manager_t *entities) {
@@ -596,7 +433,7 @@ static void client_setup(tt_entity_manager_t *entity_manager) {
   packets_add(&entity_manager->cengine.client_connection.packet_infos);
   ttec_load_assets(&entity_manager->cengine);
 
-  entity_manager_init(entity_manager);
+  entity_manager_init_client(entity_manager);
   keybinds_setup(entity_manager);
 
   tt_keymap_load(&entity_manager->keymap, "keys.toml", true, &HEAP_ALLOCATOR);
@@ -777,12 +614,12 @@ static i32 client_run(void) {
     srvr_connect_text.cmd_data.cmd_text.y = 300;
     ttb_render(entity_manager.cengine.backend, srvr_connect_text);
 
-    ttui_label_render(
-        entity_manager.cengine.backend, ttui_texture_default,
+    ttui_button(
+        entity_manager.cengine.backend,
         ttui_text(
             {.text = "Hello", .text_size = 10, .text_color = TT_COLOR_WHITE}),
         ttb_screen_width(entity_manager.cengine.backend) / 2 - 200,
-        ttb_screen_height(entity_manager.cengine.backend) / 2 - 200, 100, 30);
+        ttb_screen_height(entity_manager.cengine.backend) / 2 - 200, 100, 30, false);
 
     if (running) {
       running = ttec_update(&entity_manager.cengine);
@@ -800,4 +637,24 @@ static i32 client_run(void) {
   entity_manager_deinit(&entity_manager);
 
   return 0;
+}
+
+void entity_manager_init_client(tt_entity_manager_t *entity_manager) {
+  tt_keymap_init(&entity_manager->keymap, &HEAP_ALLOCATOR);
+  tt_translation_manager_init(&entity_manager->translation_manager, "en_us",
+                              &HEAP_ALLOCATOR);
+
+  tt_camera_init(&entity_manager->camera, entity_manager->cengine.backend);
+  entity_manager->camera.zoom = 4;
+}
+
+void entity_manager_init_server(tt_entity_manager_t *entity_manager) {
+  bump_init(&entity_manager->server_client_info_bump, 4800);
+  bump_allocator_init(&entity_manager->server_client_info_alloc,
+                      &entity_manager->server_client_info_bump);
+}
+
+void entity_manager_deinit(tt_entity_manager_t *entity_manager) {
+  tt_keymap_deinit(&entity_manager->keymap);
+  tt_translation_manager_deinit(&entity_manager->translation_manager);
 }

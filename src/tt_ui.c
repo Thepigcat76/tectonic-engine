@@ -33,22 +33,22 @@ void ttui_set_config_default(tt_asset_manager_t *assets) {
   ttui_config = default_config;
 }
 
-bool ttui_button_render(tt_backend_t *backend, ttui_texture_t tex,
+bool ttui_button(tt_backend_t *backend,
                         ttui_text_t text, i32 x, i32 y, i32 width, i32 height, bool mouse_released) {
-  if (tex.tex_tint == 0) {
-    tex.tex_tint = TT_COLOR_WHITE;
-  }
   if (text.text_color == 0) {
     text.text_color = ttui_config.text_default_color;
   }
   if (text.text_size == 0) {
     text.text_size = ttui_config.text_default_size;
   }
+  
+  bool hovered = ttb_mouse_x(backend) > x && ttb_mouse_x(backend) < x + width && ttb_mouse_y(backend) > y && ttb_mouse_y(backend) < y + height;
+
   ttb_render_cmd_t bg_cmd = {
       .cmd_id = TTB_RENDER_CMD_TEXTURE,
       .cmd_data.cmd_tex = {
-          .texture = tex.use_default ? ttui_config.button_bg_tex : tex.tex,
-          .tint_color = tex.tex_tint,
+          .texture = hovered ? ttui_config.button_selected_bg_tex : ttui_config.button_bg_tex,
+          .tint_color = TT_COLOR_WHITE,
           .atlas_src.x = 0,
           .atlas_src.y = 0,
           .atlas_src.width = width,
@@ -76,11 +76,8 @@ bool ttui_button_render(tt_backend_t *backend, ttui_texture_t tex,
   return false;
 }
 
-void ttui_label_render(tt_backend_t *backend, ttui_texture_t tex,
+void ttui_label(tt_backend_t *backend,
                        ttui_text_t text, i32 x, i32 y, i32 width, i32 height) {
-  if (tex.tex_tint == 0) {
-    tex.tex_tint = TT_COLOR_WHITE;
-  }
   if (text.text_color == 0) {
     text.text_color = ttui_config.text_default_color;
   }
@@ -90,8 +87,8 @@ void ttui_label_render(tt_backend_t *backend, ttui_texture_t tex,
   ttb_render_cmd_t bg_cmd = {
       .cmd_id = TTB_RENDER_CMD_TEXTURE,
       .cmd_data.cmd_tex = {
-          .texture = tex.use_default ? ttui_config.label_bg_tex : tex.tex,
-          .tint_color = tex.tex_tint,
+          .texture = ttui_config.label_bg_tex,
+          .tint_color = TT_COLOR_WHITE,
           .atlas_src.x = 0,
           .atlas_src.y = 0,
           .atlas_src.width = width,

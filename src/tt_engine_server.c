@@ -1,11 +1,14 @@
 #include "../include/tt_engine.h"
+
+#include "lilc/alloc.h"
 #include "lilc/array.h"
-#include "lilc/deque.h"
 #include "lilc/log.h"
 #include "lilsockets.h"
-#include <bits/pthreadtypes.h>
-#include <lilc/alloc.h>
+
+#include "tt_internal_shared.h"
+
 #include <pthread.h>
+#include <stdio.h>
 #include <sys/cdefs.h>
 #include <sys/poll.h>
 
@@ -44,13 +47,6 @@ void ttes_server_stop(tt_engine_server_t *engine) {
   pthread_rwlock_unlock(&engine->server.server_lock);
 }
 
-extern bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,
-                                tt_packet_queue_t packet_queue,
-                                pthread_mutex_t *packet_queue_mutex,
-                                tt_packet_t *out_packet,
-                                tt_packet_context_t *out_context,
-                                allocator_t *packet_alloc, void *decode_ctx);
-
 void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
                       tt_packet_id_t packet_id, void *payload) {
   tt_packet_info_t packet_info = engine->server.packet_infos.infos[packet_id];
@@ -67,22 +63,17 @@ void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
 bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
                      tt_packet_context_t *packet_ctx, void *decode_ctx) {
   return tt_packet_queue_pop(
-      &engine->server.packet_infos, engine->server.packet_data_queue,
+      &engine->server.packet_infos, &engine->server.packet_data_queue,
       &engine->server.packet_queue_mutex, packet, packet_ctx,
       &engine->server.packet_alloc, decode_ctx);
 }
-
-extern bool tt_handle_connection(addr_t recv_addr, allocator_t *packet_alloc,
-                                 pthread_mutex_t *packet_queue_mutex,
-                                 tt_packet_queue_t *packet_data_queue);
 
 // Server rwlock already locked
 static bool tt_server_handle_client_connection(tt_server_t *server,
                                                u64 client_id) {
   addr_t client_addr = server->connected_clients[client_id].address;
 
-  return tt_handle_connection(client_addr, &server->packet_alloc,
-                              &server->packet_queue_mutex,
+  return tt_handle_connection(client_addr, &server->packet_queue_mutex,
                               &server->packet_data_queue);
 }
 
@@ -120,7 +111,9 @@ static void *ttes_packet_receiver_run(void *arg) {
       for (size_t i = 0; i < array_len(server->poll_clients); i++) {
         if (server->poll_clients[i].revents & (POLLIN | POLLRDNORM)) {
           if (!tt_server_handle_client_connection(server, i)) {
+            perror("Handling client connection");
             log_error("Failed to handle client connection");
+            exit(1);
           }
         }
 
