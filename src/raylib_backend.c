@@ -74,6 +74,11 @@ static ttb_keyboard_key_e ttb_key_from_rl(KeyboardKey rl_key);
 
 static KeyboardKey rl_key_from_ttb(ttb_keyboard_key_e key);
 
+i32 ttb_fps(tt_backend_t *backend) {
+  (void) backend;
+  return GetFPS();
+}
+
 void ttb_events_poll(tt_backend_t *backend) {
   if (WindowShouldClose()) {
     log_debug("close window event");

@@ -124,8 +124,8 @@ bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
 }
 
 // client connection rwlock is locked
-static bool ttec_packet_recv(tt_client_connection_t *connection,
-                             addr_t server_addr) {
+static tt_connection_status_e
+ttec_packet_recv(tt_client_connection_t *connection, addr_t server_addr) {
   return tt_handle_connection(server_addr, &connection->packet_queue_mutex,
                               &connection->packet_data_queue);
 }
@@ -160,8 +160,16 @@ static void *ttec_packet_receiver_run(void *arg) {
 
       // do stuff ...
       pthread_rwlock_rdlock(&connection->connection_rwlock);
-      if (!ttec_packet_recv(connection, server_addr)) {
+      tt_connection_status_e status = ttec_packet_recv(connection, server_addr);
+      switch (status) {
+      case TT_CONNECTION_CLOSED: {
+        connection->state = TT_CLIENT_STOPPED;
+      } break;
+      case TT_CONNECTION_ILLEGAL_PACKET: {
         log_error("Failed to receive packet from server");
+      } break;
+      default: {
+      } break;
       }
       pthread_rwlock_unlock(&connection->connection_rwlock);
     } break;

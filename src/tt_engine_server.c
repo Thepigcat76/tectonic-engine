@@ -69,8 +69,8 @@ bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
 }
 
 // Server rwlock already locked
-static bool tt_server_handle_client_connection(tt_server_t *server,
-                                               u64 client_id) {
+static tt_connection_status_e
+tt_server_handle_client_connection(tt_server_t *server, u64 client_id) {
   addr_t client_addr = server->connected_clients[client_id].address;
 
   return tt_handle_connection(client_addr, &server->packet_queue_mutex,
@@ -110,10 +110,20 @@ static void *ttes_packet_receiver_run(void *arg) {
 
       for (size_t i = 0; i < array_len(server->poll_clients); i++) {
         if (server->poll_clients[i].revents & (POLLIN | POLLRDNORM)) {
-          if (!tt_server_handle_client_connection(server, i)) {
-            perror("Handling client connection");
-            log_error("Failed to handle client connection");
-            exit(1);
+          tt_connection_status_e status =
+              tt_server_handle_client_connection(server, i);
+          switch (status) {
+          case TT_CONNECTION_ILLEGAL_PACKET: {
+            log_warn("Received illegal packet from: %zu", i);
+          } break;
+          case TT_CONNECTION_CLOSED: {
+            log_info("Client connection closed, stopping");
+            pthread_rwlock_wrlock(&server->server_lock);
+            server->state = TT_SERVER_STOPPED;
+            pthread_rwlock_unlock(&server->server_lock);
+          } break;
+          default: {
+          } break;
           }
         }
 

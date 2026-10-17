@@ -29,9 +29,12 @@ tt_connection_status_e tt_handle_connection(addr_t recv_addr,
                           tt_packet_queue_t *packet_data_queue) {
   u8 len_buf[8] = {0};
   i64 len_res = sockets_receive(recv_addr, len_buf, 8);
+  if (len_res == 0) {
+    return TT_CONNECTION_CLOSED;
+  }
   if (len_res != 8) {
     log_error("Failed to receive packet len, received %ld bytes, but expected 8 bytes for payload length", len_res);
-    return false;
+    return TT_CONNECTION_ILLEGAL_PACKET;
   }
 
   u64 len = 0;
@@ -46,7 +49,7 @@ tt_connection_status_e tt_handle_connection(addr_t recv_addr,
   if (payload_res == -1) {
     log_error("Failed to receive payload");
     tt_byte_buf_deinit(&bytebuf);
-    return false;
+    return TT_CONNECTION_ILLEGAL_PACKET;
   }
   _internal_array_set_len(bytebuf.bytes, len);
 
@@ -58,7 +61,7 @@ tt_connection_status_e tt_handle_connection(addr_t recv_addr,
   deque_push_back(*packet_data_queue, entry);
   pthread_mutex_unlock(packet_queue_mutex);
 
-  return true;
+  return TT_CONNECTION_OPEN;
 }
 
 static bool tt_decode_packet_with_handle(tt_packet_info_array_t *packet_infos,

@@ -2,6 +2,7 @@
 
 #include "tt_shared.h"
 #include "lilc/dynstr.h"
+#include <lilc/alloc.h>
 
 typedef void (*tt_render_text_func_t)(tt_backend_t *, i32 x, i32 y, const char *text, usz text_len, color_t text_color, usz font_size);
 
@@ -23,6 +24,28 @@ typedef struct {
   usz text_size;
 } ttui_text_t;
 
+typedef enum {
+  TTUI_LAYOUT_NONE,
+  TTUI_LAYOUT_HORIZONTAL,
+  TTUI_LAYOUT_VERTICAL,
+} ttui_layout_kind_e;
+
+typedef struct {
+  ttui_layout_kind_e kind;
+  i32 x;
+  i32 y;
+  i32 width;
+  i32 height;
+  i32 padding;
+  bool render;
+
+  void *ui_elements;
+  bump_t elem_bump;
+  allocator_t elem_alloc;
+} ttui_layout_t;
+
+void ttui_layout_finish(tt_backend_t *backend, ttui_layout_t *layout);
+
 #define ttui_text(...) (ttui_text_t)__VA_ARGS__
 
 #define ttui_text_default(_text) (ttui_text_t){.text = _text, .text_color = TT_COLOR_WHITE, .text_size = 0}
@@ -41,8 +64,8 @@ void ttui_set_config(tt_asset_manager_t *assets, ttui_config_t config);
 
 void ttui_set_config_default(tt_asset_manager_t *assets);
 
-bool ttui_button(tt_backend_t *backend, ttui_text_t text, i32 x, i32 y, i32 width, i32 height, bool mouse_released);
+bool ttui_button(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text, i32 x, i32 y, i32 width, i32 height, bool mouse_released);
 
-void ttui_label(tt_backend_t *backend, ttui_text_t text, i32 x, i32 y, i32 width, i32 height);
+void ttui_label(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text, i32 x, i32 y, i32 width, i32 height);
 
-void ttui_text_box(tt_backend_t *backend, dyn_string_t *text_buf, i32 x, i32 y, i32 width, i32 height, bool multiline);
+void ttui_text_box(tt_backend_t *backend, ttui_layout_t *layout, dyn_string_t *text_buf, i32 x, i32 y, i32 width, i32 height, i32 max_lines);

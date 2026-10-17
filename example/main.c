@@ -11,6 +11,7 @@
 #include "lilc/log.h"
 #include "lilc/numbers.h"
 
+#include <lilc/bump.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -41,6 +42,27 @@ static f32 entity_x(tt_entity_manager_t *entities, tt_entity_t entity) {
 static f32 entity_y(tt_entity_manager_t *entities, tt_entity_t entity) {
   if (entities->c_position[entity].present) {
     return entities->c_position[entity].y;
+  }
+  return 0;
+}
+
+static f32 entity_width(tt_entity_manager_t *entities, tt_entity_t entity) {
+  if (entities->c_box[entity].present) {
+    return entities->c_box[entity].width;
+  }
+  return 0;
+}
+
+static f32 entity_height(tt_entity_manager_t *entities, tt_entity_t entity) {
+  if (entities->c_box[entity].present) {
+    return entities->c_box[entity].height;
+  }
+  return 0;
+}
+
+static f32 entity_depth(tt_entity_manager_t *entities, tt_entity_t entity) {
+  if (entities->c_box[entity].present) {
+    return entities->c_box[entity].depth;
   }
   return 0;
 }
@@ -138,7 +160,7 @@ static void entities_render(tt_entity_manager_t *entities,
   }
 }
 
-static void system_render(tt_entity_manager_t *entities) {
+static void system_entities_render(tt_entity_manager_t *entities) {
   entities_render(entities, RENDER_LAYER_BEHIND_PLAYER);
   entity_render(entities, entities->player_handle);
   entities_render(entities, RENDER_LAYER_BEFORE_PLAYER);
@@ -179,7 +201,6 @@ static void system_velocity(tt_entity_manager_t *entities) {
           continue;
 
         if (entity_collides(entities, entity_id, collision_entity)) {
-          log_debug("Colliding with: %zu", entity_id);
           if (entity_vel->x_velocity < 0) {
             entity_pos->x =
                 entity_x(entities, collision_entity) + collision_box.width;
@@ -203,7 +224,6 @@ static void system_velocity(tt_entity_manager_t *entities) {
           continue;
 
         if (entity_collides(entities, entity_id, collision_entity)) {
-          log_debug("Colliding with: %zu", entity_id);
           if (entity_vel->y_velocity < 0) {
             entity_pos->y = entity_y(entities, collision_entity) +
                             collision_box.height + collision_box.depth -
@@ -256,10 +276,12 @@ static bool system_input(tt_entity_manager_t *entities) {
 }
 
 static struct {
-  
-} ui_input;
+  bool mouse_left_button_released;
+} ui_input = {0};
 
 static bool system_events(tt_entity_manager_t *entities) {
+  memset(&ui_input, 0, sizeof(ui_input));
+
   ttb_events_poll(entities->cengine.backend);
 
   ttb_event_t event;
@@ -284,6 +306,9 @@ static bool system_events(tt_entity_manager_t *entities) {
         set_component(entities, crate_entity, box,
                       (.width = 24, .height = 14, .depth = 10));
         log_debug("Spawned crate");
+      } else if (event.event_data.evt_mouse_input.left_button ==
+                 TTB_KEY_STATE_RELEASED) {
+        ui_input.mouse_left_button_released = true;
       }
     } break;
     case TTB_EVENT_KEYBOARD_INPUT: {
@@ -296,6 +321,24 @@ static bool system_events(tt_entity_manager_t *entities) {
   }
 
   return true;
+}
+
+static void system_ui(tt_entity_manager_t *entities) {
+  ttui_layout_t layout = {
+      .kind = TTUI_LAYOUT_HORIZONTAL,
+      .padding = 32,
+      .render = true,
+      .width = 400,
+      .height = 400,
+      .x = (ttb_screen_width(entities->cengine.backend) - 400) / 2,
+      .y = (ttb_screen_height(entities->cengine.backend) - 400) / 2,
+  };
+
+  ttui_button(
+      entities->cengine.backend, &layout,
+      ttui_text(
+          {.text = "Hello", .text_size = 10, .text_color = TT_COLOR_WHITE}),
+      0, 0, 100, 30, ui_input.mouse_left_button_released);
 }
 
 static bool system_client_packets(tt_entity_manager_t *entities) {
@@ -328,6 +371,8 @@ static void packets_add(tt_packet_info_array_t *packet_infos) {
 
   tt_packet_info_lock(packet_infos);
 }
+
+static void server_system_cli(tt_entity_manager_t *entities) {}
 
 static i32 server_run(void) {
   tt_entity_manager_t entity_manager = {.sengine = {0}};
@@ -501,6 +546,12 @@ static i32 client_run(void) {
 
   client_setup(&entity_manager);
 
+  bump_t temp_bump = {0};
+  bump_init(&temp_bump, 128000);
+
+  allocator_t temp_alloc = {0};
+  bump_allocator_init(&temp_alloc, &temp_bump);
+
   tt_asset_manager_t *assets = &entity_manager.cengine.asset_manager;
 
   player_tex = tt_asset_bind(assets, "tex/player.png");
@@ -556,8 +607,12 @@ static i32 client_run(void) {
     system_velocity(&entity_manager);
 
     if (entity_manager.c_position[entity_manager.player_handle].present) {
-      entity_manager.camera.target_x = player_x(&entity_manager);
-      entity_manager.camera.target_y = player_y(&entity_manager);
+      entity_manager.camera.target_x =
+          player_x(&entity_manager) +
+          entity_width(&entity_manager, entity_manager.player_handle) / 2;
+      entity_manager.camera.target_y =
+          player_y(&entity_manager) +
+          entity_height(&entity_manager, entity_manager.player_handle) / 2;
     } else {
       entity_manager.camera.target_x =
           ttb_screen_width(entity_manager.cengine.backend) / 2;
@@ -580,7 +635,7 @@ static i32 client_run(void) {
                    .cmd_data.cmd_apply_cam.cam = entity_manager.camera,
                });
 
-    system_render(&entity_manager);
+    system_entities_render(&entity_manager);
 
     ttb_render(
         entity_manager.cengine.backend,
@@ -605,8 +660,13 @@ static i32 client_run(void) {
 
     ttb_render(entity_manager.cengine.backend, srvr_connect_text);
 
-    srvr_connect_text.cmd_data.cmd_text.text = tt_translations_lookup(
-        &entity_manager.translation_manager, "msg.welcome");
+    srvr_connect_text.cmd_data.cmd_text.text =
+        dyn_string_makef(
+            &temp_alloc, "%s, %d",
+            tt_translations_lookup(&entity_manager.translation_manager,
+                                   "msg.welcome"),
+            ttb_fps(entity_manager.cengine.backend))
+            .string;
     srvr_connect_text.cmd_data.cmd_text.font_size = 46;
     srvr_connect_text.cmd_data.cmd_text.text_color =
         color_make(255, 0, 145, 255);
@@ -614,12 +674,7 @@ static i32 client_run(void) {
     srvr_connect_text.cmd_data.cmd_text.y = 300;
     ttb_render(entity_manager.cengine.backend, srvr_connect_text);
 
-    ttui_button(
-        entity_manager.cengine.backend,
-        ttui_text(
-            {.text = "Hello", .text_size = 10, .text_color = TT_COLOR_WHITE}),
-        ttb_screen_width(entity_manager.cengine.backend) / 2 - 200,
-        ttb_screen_height(entity_manager.cengine.backend) / 2 - 200, 100, 30, false);
+    system_ui(&entity_manager);
 
     if (running) {
       running = ttec_update(&entity_manager.cengine);
@@ -627,12 +682,16 @@ static i32 client_run(void) {
       ttec_update(&entity_manager.cengine);
     }
 
+    bump_reset(&temp_bump);
+
     connection_retry_timer--;
   }
 
   ttec_client_stop(&entity_manager.cengine);
 
   ttec_deinit(&entity_manager.cengine);
+
+  bump_free(&temp_bump);
 
   entity_manager_deinit(&entity_manager);
 
