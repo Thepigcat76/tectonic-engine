@@ -20,6 +20,8 @@ struct tt_entity_manager {
 
   tt_entity_t player_handle;
 
+  bool menu_open;
+
   tt_entity_t cur_entity_id;
   usz entities_amount;
 

@@ -97,10 +97,13 @@ static f32 entity_vel_y(tt_entity_manager_t *entities, tt_entity_t entity) {
 
 static tt_asset_id_t player_tex;
 static tt_asset_id_t crate_tex;
+
 static tt_keymap_id_t move_forward_key;
 static tt_keymap_id_t move_backward_key;
 static tt_keymap_id_t move_left_key;
 static tt_keymap_id_t move_right_key;
+
+static tt_keymap_id_t open_esc_menu_key;
 
 tt_entity_t tt_entity_make(tt_entity_manager_t *entities) {
   entities->entities_amount += 1;
@@ -272,15 +275,20 @@ static bool system_input(tt_entity_manager_t *entities) {
       entities, entities->player_handle, velocity,
       (.x_velocity = dx * PLAYER_SPEED, .y_velocity = dy * PLAYER_SPEED));
 
+  if (ttec_key_pressed(&entities->cengine, &entities->keymap,
+                       open_esc_menu_key)) {
+    entities->menu_open = !entities->menu_open;
+  }
+
   return true;
 }
 
 static struct {
   bool mouse_left_button_released;
-} ui_input = {0};
+} mouse_input = {0};
 
 static bool system_events(tt_entity_manager_t *entities) {
-  memset(&ui_input, 0, sizeof(ui_input));
+  memset(&mouse_input, 0, sizeof(mouse_input));
 
   ttb_events_poll(entities->cengine.backend);
 
@@ -292,23 +300,8 @@ static bool system_events(tt_entity_manager_t *entities) {
     } break;
     case TTB_EVENT_MOUSE_INPUT: {
       if (event.event_data.evt_mouse_input.left_button ==
-          TTB_KEY_STATE_PRESSED) {
-        tt_entity_t crate_entity = tt_entity_make(entities);
-        set_component(
-            entities, crate_entity, position,
-            (.x = ttb_screen_to_cam_x(entities->cengine.backend,
-                                      ttb_mouse_x(entities->cengine.backend),
-                                      &entities->camera),
-             .y = ttb_screen_to_cam_y(entities->cengine.backend,
-                                      ttb_mouse_y(entities->cengine.backend),
-                                      &entities->camera)));
-        set_component(entities, crate_entity, texture, (.texture = crate_tex));
-        set_component(entities, crate_entity, box,
-                      (.width = 24, .height = 14, .depth = 10));
-        log_debug("Spawned crate");
-      } else if (event.event_data.evt_mouse_input.left_button ==
-                 TTB_KEY_STATE_RELEASED) {
-        ui_input.mouse_left_button_released = true;
+          TTB_KEY_STATE_RELEASED) {
+        mouse_input.mouse_left_button_released = true;
       }
     } break;
     case TTB_EVENT_KEYBOARD_INPUT: {
@@ -323,22 +316,77 @@ static bool system_events(tt_entity_manager_t *entities) {
   return true;
 }
 
-static void system_ui(tt_entity_manager_t *entities) {
-  ttui_layout_t layout = {
-      .kind = TTUI_LAYOUT_HORIZONTAL,
+typedef enum {
+  UI_RESULT_PASS,
+  UI_RESULT_CONSUME_CLICK,
+  UI_RESULT_EXIT_GAME,
+} ui_result_e;
+
+static ui_result_e ui_render(tt_entity_manager_t *entities,
+                             ttui_layout_t *layout) {
+  ui_result_e ui_res = UI_RESULT_PASS;
+
+  if (ttui_button(
+          entities->cengine.backend, layout,
+          ttui_text(
+              {.text = "Hello", .text_size = 10, .text_color = TT_COLOR_WHITE}),
+          0, 0, 100, 30, mouse_input.mouse_left_button_released)) {
+    log_debug("hello 0 button pressed");
+    ui_res = UI_RESULT_CONSUME_CLICK;
+  }
+  if (ttui_button(
+          entities->cengine.backend, layout,
+          ttui_text(
+              {.text = "World", .text_size = 10, .text_color = TT_COLOR_WHITE}),
+          0, 0, 100, 30, mouse_input.mouse_left_button_released)) {
+    log_debug("world button pressed");
+    ui_res = UI_RESULT_CONSUME_CLICK;
+  }
+  ttui_label(
+      entities->cengine.backend, layout,
+      ttui_text(
+          {.text = "Label", .text_size = 10, .text_color = TT_COLOR_WHITE}),
+      0, 0, 100, 30);
+  if (ttui_button(
+          entities->cengine.backend, layout,
+          ttui_text(
+              {.text = "Hello", .text_size = 10, .text_color = TT_COLOR_WHITE}),
+          0, 0, 100, 30, mouse_input.mouse_left_button_released)) {
+    log_debug("hello 1 button pressed");
+    ui_res = UI_RESULT_CONSUME_CLICK;
+  }
+
+  return ui_res;
+}
+
+static ui_result_e system_ui(tt_entity_manager_t *entities) {
+  static ttui_layout_t layout = {
+      .kind = TTUI_LAYOUT_VERTICAL,
       .padding = 32,
-      .render = true,
       .width = 400,
       .height = 400,
-      .x = (ttb_screen_width(entities->cengine.backend) - 400) / 2,
-      .y = (ttb_screen_height(entities->cengine.backend) - 400) / 2,
+      .ui_scale = 2.4,
   };
+  layout.x = (ttb_screen_width(entities->cengine.backend) - 400) / 2;
+  layout.y = (ttb_screen_height(entities->cengine.backend) - 400) / 2;
 
-  ttui_button(
-      entities->cengine.backend, &layout,
-      ttui_text(
-          {.text = "Hello", .text_size = 10, .text_color = TT_COLOR_WHITE}),
-      0, 0, 100, 30, ui_input.mouse_left_button_released);
+  ui_result_e res = UI_RESULT_PASS;
+  if (entities->menu_open) {
+    // First ui pass, calculate positions and width
+    layout.render = false;
+
+    ui_render(entities, &layout);
+
+    ttui_layout_finish(entities->cengine.backend, &layout);
+
+    // Second ui pass, render elements and calculated positions and widths
+    layout.render = true;
+
+    res = ui_render(entities, &layout);
+
+    ttui_layout_finish(entities->cengine.backend, &layout);
+  }
+  return res;
 }
 
 static bool system_client_packets(tt_entity_manager_t *entities) {
@@ -455,6 +503,22 @@ static i32 server_run(void) {
   return 0;
 }
 
+static void crate_spawn(tt_entity_manager_t *entities) {
+  tt_entity_t crate_entity = tt_entity_make(entities);
+  set_component(
+      entities, crate_entity, position,
+      (.x = ttb_screen_to_cam_x(entities->cengine.backend,
+                                ttb_mouse_x(entities->cengine.backend),
+                                &entities->camera),
+       .y = ttb_screen_to_cam_y(entities->cengine.backend,
+                                ttb_mouse_y(entities->cengine.backend),
+                                &entities->camera)));
+  set_component(entities, crate_entity, texture, (.texture = crate_tex));
+  set_component(entities, crate_entity, box,
+                (.width = 24, .height = 14, .depth = 10));
+  log_debug("Spawned crate");
+}
+
 static void keybinds_setup(tt_entity_manager_t *entities) {
   move_forward_key =
       tt_keymap_bind_key(&entities->keymap, "keybind.move.forward", TTB_KEY_W);
@@ -464,6 +528,8 @@ static void keybinds_setup(tt_entity_manager_t *entities) {
       tt_keymap_bind_key(&entities->keymap, "keybind.move.left", TTB_KEY_A);
   move_right_key =
       tt_keymap_bind_key(&entities->keymap, "keybind.move.right", TTB_KEY_D);
+  open_esc_menu_key = tt_keymap_bind_key(
+      &entities->keymap, "keybind.open_esc_menu", TTB_KEY_ESCAPE);
 }
 
 static void client_setup(tt_entity_manager_t *entity_manager) {
@@ -674,7 +740,13 @@ static i32 client_run(void) {
     srvr_connect_text.cmd_data.cmd_text.y = 300;
     ttb_render(entity_manager.cengine.backend, srvr_connect_text);
 
-    system_ui(&entity_manager);
+    ui_result_e ui_res = system_ui(&entity_manager);
+    if (ui_res == UI_RESULT_EXIT_GAME) {
+      running = false;
+    } else if ((ui_res == UI_RESULT_PASS || !entity_manager.menu_open) &&
+               mouse_input.mouse_left_button_released) {
+      crate_spawn(&entity_manager);
+    }
 
     if (running) {
       running = ttec_update(&entity_manager.cengine);

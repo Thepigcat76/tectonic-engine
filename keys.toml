@@ -2,3 +2,4 @@ keybind.move.forward = {default = "keyboard_key_w", selected = "keyboard_key_w"}
 keybind.move.backward = {default = "keyboard_key_s", selected = "keyboard_key_s"}
 keybind.move.left = {default = "keyboard_key_a", selected = "keyboard_key_a"}
 keybind.move.right = {default = "keyboard_key_d", selected = "keyboard_key_d"}
+keybind.open_esc_menu = {default = "keyboard_key_escape", selected = "keyboard_key_escape"}

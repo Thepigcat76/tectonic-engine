@@ -9,7 +9,7 @@
 #include "lilc/todo.h"
 
 #include "raylib.h"
-#include <lilc/file.h>
+#include "lilc/file.h"
 
 struct tt_backend {
   ttb_render_cmd_t *render_cmds;
@@ -75,7 +75,7 @@ static ttb_keyboard_key_e ttb_key_from_rl(KeyboardKey rl_key);
 static KeyboardKey rl_key_from_ttb(ttb_keyboard_key_e key);
 
 i32 ttb_fps(tt_backend_t *backend) {
-  (void) backend;
+  (void)backend;
   return GetFPS();
 }
 
@@ -113,42 +113,50 @@ void ttb_events_poll(tt_backend_t *backend) {
     }
   }
 
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-      ttb_event_t key_pressed_evt = {
-          .event_id = TTB_EVENT_MOUSE_INPUT,
-          .event_data.evt_mouse_input =
-              {
-                  .button = TTB_MOUSE_BUTTON_LEFT,
-                  .left_button = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) ? TTB_KEY_STATE_PRESSED : TTB_KEY_STATE_RELEASED,
-              },
-      };
-      deque_push_back(backend->event_queue, key_pressed_evt);
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) ||
+      IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+    ttb_event_t key_pressed_evt = {
+        .event_id = TTB_EVENT_MOUSE_INPUT,
+        .event_data.evt_mouse_input =
+            {
+                .button = TTB_MOUSE_BUTTON_LEFT,
+                .left_button = IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
+                                   ? TTB_KEY_STATE_PRESSED
+                                   : TTB_KEY_STATE_RELEASED,
+            },
+    };
+    deque_push_back(backend->event_queue, key_pressed_evt);
   }
 
-  if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) || IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
-      ttb_event_t key_pressed_evt = {
-          .event_id = TTB_EVENT_MOUSE_INPUT,
-          .event_data.evt_mouse_input =
-              {
-                  .button = TTB_MOUSE_BUTTON_RIGHT,
-                  .left_button = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) ? TTB_KEY_STATE_PRESSED : TTB_KEY_STATE_RELEASED,
-              },
-      };
-      deque_push_back(backend->event_queue, key_pressed_evt);
+  if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) ||
+      IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
+    ttb_event_t key_pressed_evt = {
+        .event_id = TTB_EVENT_MOUSE_INPUT,
+        .event_data.evt_mouse_input =
+            {
+                .button = TTB_MOUSE_BUTTON_RIGHT,
+                .left_button = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)
+                                   ? TTB_KEY_STATE_PRESSED
+                                   : TTB_KEY_STATE_RELEASED,
+            },
+    };
+    deque_push_back(backend->event_queue, key_pressed_evt);
   }
 
-  if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) || IsMouseButtonReleased(MOUSE_BUTTON_MIDDLE)) {
-      ttb_event_t key_pressed_evt = {
-          .event_id = TTB_EVENT_MOUSE_INPUT,
-          .event_data.evt_mouse_input =
-              {
-                  .button = TTB_MOUSE_BUTTON_MIDDLE,
-                  .left_button = IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) ? TTB_KEY_STATE_PRESSED : TTB_KEY_STATE_RELEASED,
-              },
-      };
-      deque_push_back(backend->event_queue, key_pressed_evt);
+  if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) ||
+      IsMouseButtonReleased(MOUSE_BUTTON_MIDDLE)) {
+    ttb_event_t key_pressed_evt = {
+        .event_id = TTB_EVENT_MOUSE_INPUT,
+        .event_data.evt_mouse_input =
+            {
+                .button = TTB_MOUSE_BUTTON_MIDDLE,
+                .left_button = IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)
+                                   ? TTB_KEY_STATE_PRESSED
+                                   : TTB_KEY_STATE_RELEASED,
+            },
+    };
+    deque_push_back(backend->event_queue, key_pressed_evt);
   }
-  
 }
 
 static void ttb_camera_copy(Camera2D *rl_cam, const tt_camera_t *cam) {
@@ -169,11 +177,10 @@ i32 ttb_screen_to_cam_x(tt_backend_t *backend, i32 x, const tt_camera_t *cam) {
 i32 ttb_screen_to_cam_y(tt_backend_t *backend, i32 y, const tt_camera_t *cam) {
   Camera2D rl_cam;
   ttb_camera_copy(&rl_cam, cam);
-  return GetScreenToWorld2D((Vector2){.y = y}, rl_cam).y;}
-
-f64 ttb_frame_time(tt_backend_t *backend) {
-  return GetFrameTime();
+  return GetScreenToWorld2D((Vector2){.y = y}, rl_cam).y;
 }
+
+f64 ttb_frame_time(tt_backend_t *backend) { return GetFrameTime(); }
 
 bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key) {
   (void)backend;
@@ -378,18 +385,18 @@ i32 ttb_mouse_y(tt_backend_t *backend) {
 }
 
 i32 ttb_screen_width(tt_backend_t *backend) {
-  (void) backend;
+  (void)backend;
   return GetScreenWidth();
 }
 
 i32 ttb_screen_height(tt_backend_t *backend) {
-  (void) backend;
+  (void)backend;
   return GetScreenHeight();
 }
 
 bool ttb_camera_make_id(tt_backend_t *backend, u64 *cam_id) {
   *cam_id = backend->cameras_amount++;
-  
+
   return true;
 }
 
@@ -443,6 +450,17 @@ void _ttb_cmds_render(tt_backend_t *backend) {
 
     } break;
     case TTB_RENDER_CMD_RECTANGLE: {
+      struct ttb_cmd_rect cmd_rect = render_cmd->cmd_data.cmd_rect;
+
+      if (cmd_rect.outline_only) {
+        DrawRectangleLines(cmd_rect.rectangle.x, cmd_rect.rectangle.y,
+                           cmd_rect.rectangle.width, cmd_rect.rectangle.height,
+                           color_convert(cmd_rect.color));
+      } else {
+        DrawRectangleRec(rect_convert(cmd_rect.rectangle),
+                         color_convert(cmd_rect.color));
+      }
+
     } break;
     case TTB_RENDER_CMD_TEXT: {
       struct ttb_cmd_text cmd_text = render_cmd->cmd_data.cmd_text;
@@ -474,8 +492,10 @@ void _ttb_cmds_render(tt_backend_t *backend) {
       if (!has_camera) {
         log_warn("Tried unapplying camera, even though none was active");
       } else {
-        if (cam_id != (i64) render_cmd->cmd_data.cmd_unapply_cam.cam_id) {
-          log_warn("Tried unapplying different camera (%zu) from the one active: %zu", render_cmd->cmd_data.cmd_unapply_cam.cam_id, cam_id);
+        if (cam_id != (i64)render_cmd->cmd_data.cmd_unapply_cam.cam_id) {
+          log_warn("Tried unapplying different camera (%zu) from the one "
+                   "active: %zu",
+                   render_cmd->cmd_data.cmd_unapply_cam.cam_id, cam_id);
         }
         EndMode2D();
         has_camera = false;

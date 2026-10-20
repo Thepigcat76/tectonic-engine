@@ -1,8 +1,9 @@
 #pragma once
 
 #include "tt_shared.h"
+
 #include "lilc/dynstr.h"
-#include <lilc/alloc.h>
+#include "lilc/deque.h"
 
 typedef void (*tt_render_text_func_t)(tt_backend_t *, i32 x, i32 y, const char *text, usz text_len, color_t text_color, usz font_size);
 
@@ -30,6 +31,8 @@ typedef enum {
   TTUI_LAYOUT_VERTICAL,
 } ttui_layout_kind_e;
 
+typedef struct ttui_elem ttui_elem_t;
+
 typedef struct {
   ttui_layout_kind_e kind;
   i32 x;
@@ -38,8 +41,15 @@ typedef struct {
   i32 height;
   i32 padding;
   bool render;
+  f32 ui_scale;
 
-  void *ui_elements;
+  deque_t(ttui_elem_t) ui_elements;
+  i32 container_width;
+  i32 max_width;
+  i32 container_height;
+  i32 max_height;
+  bool finished;
+
   bump_t elem_bump;
   allocator_t elem_alloc;
 } ttui_layout_t;

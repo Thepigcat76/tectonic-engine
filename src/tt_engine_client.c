@@ -18,7 +18,7 @@ void ttec_init(tt_engine_client_t *engine, tt_engine_init_t init_state) {
 
   engine->events = array_new(ttb_event_t, &engine->event_alloc);
 
-  SetTargetFPS(60);
+  // TODO: Move to backend
 
   u32 window_flags = 0;
 
@@ -45,6 +45,9 @@ void ttec_init(tt_engine_client_t *engine, tt_engine_init_t init_state) {
     SetConfigFlags(window_flags);
   }
   InitWindow(window_width, window_height, window_title);
+
+  SetTargetFPS(60);
+  SetExitKey(KEY_NULL);
 
   engine->asset_manager.asset_handles = NULL;
 
