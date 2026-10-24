@@ -71,9 +71,10 @@ bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
 // Server rwlock already locked
 static tt_connection_status_e
 tt_server_handle_client_connection(tt_server_t *server, u64 client_id) {
-  addr_t client_addr = server->connected_clients[client_id].address;
+  tt_client_desc_t client_desc = server->connected_clients[client_id];
 
-  return tt_handle_connection(client_addr, &server->packet_queue_mutex,
+  return tt_handle_connection(client_desc.address, client_desc.client_id,
+                              &server->packet_queue_mutex,
                               &server->packet_data_queue);
 }
 

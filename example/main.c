@@ -13,6 +13,7 @@
 
 #include <lilc/bump.h>
 #include <math.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,69 +33,6 @@ i32 main(i32 argc, char **argv) {
   }
 }
 
-static f32 entity_x(tt_entity_manager_t *entities, tt_entity_t entity) {
-  if (entities->c_position[entity].present) {
-    return entities->c_position[entity].x;
-  }
-  return 0;
-}
-
-static f32 entity_y(tt_entity_manager_t *entities, tt_entity_t entity) {
-  if (entities->c_position[entity].present) {
-    return entities->c_position[entity].y;
-  }
-  return 0;
-}
-
-static f32 entity_width(tt_entity_manager_t *entities, tt_entity_t entity) {
-  if (entities->c_box[entity].present) {
-    return entities->c_box[entity].width;
-  }
-  return 0;
-}
-
-static f32 entity_height(tt_entity_manager_t *entities, tt_entity_t entity) {
-  if (entities->c_box[entity].present) {
-    return entities->c_box[entity].height;
-  }
-  return 0;
-}
-
-static f32 entity_depth(tt_entity_manager_t *entities, tt_entity_t entity) {
-  if (entities->c_box[entity].present) {
-    return entities->c_box[entity].depth;
-  }
-  return 0;
-}
-
-static f32 player_x(tt_entity_manager_t *entities) {
-  if (entities->c_position[entities->player_handle].present) {
-    return entities->c_position[entities->player_handle].x;
-  }
-  return 0;
-}
-
-static f32 player_y(tt_entity_manager_t *entities) {
-  if (entities->c_position[entities->player_handle].present) {
-    return entities->c_position[entities->player_handle].y;
-  }
-  return 0;
-}
-
-static f32 entity_vel_x(tt_entity_manager_t *entities, tt_entity_t entity) {
-  if (entities->c_velocity[entity].present) {
-    return entities->c_velocity[entity].x_velocity;
-  }
-  return 0;
-}
-
-static f32 entity_vel_y(tt_entity_manager_t *entities, tt_entity_t entity) {
-  if (entities->c_velocity[entity].present) {
-    return entities->c_velocity[entity].y_velocity;
-  }
-  return 0;
-}
-
 static tt_asset_id_t player_tex;
 static tt_asset_id_t crate_tex;
 
@@ -106,8 +44,8 @@ static tt_keymap_id_t move_right_key;
 static tt_keymap_id_t open_esc_menu_key;
 
 tt_entity_t tt_entity_make(tt_entity_manager_t *entities) {
-  entities->entities_amount += 1;
-  return entities->cur_entity_id++;
+  log_info("Created entity with id: %zu", entities->entities_amount);
+  return entities->entities_amount++;
 }
 
 static void entity_render(tt_entity_manager_t *entities, tt_entity_t entity) {
@@ -143,7 +81,7 @@ typedef enum {
 static void entities_render(tt_entity_manager_t *entities,
                             render_layer_e layer) {
   for (tt_entity_t entity = 0; entity < entities->entities_amount; entity++) {
-    if (entity == entities->player_handle)
+    if (entities->has_player && entity == entities->client_player_handle)
       continue;
     if (!entities->c_position[entity].present)
       continue;
@@ -165,7 +103,9 @@ static void entities_render(tt_entity_manager_t *entities,
 
 static void system_entities_render(tt_entity_manager_t *entities) {
   entities_render(entities, RENDER_LAYER_BEHIND_PLAYER);
-  entity_render(entities, entities->player_handle);
+  if (entities->has_player) {
+    entity_render(entities, entities->client_player_handle);
+  }
   entities_render(entities, RENDER_LAYER_BEFORE_PLAYER);
 }
 
@@ -271,9 +211,11 @@ static bool system_input(tt_entity_manager_t *entities) {
     dy /= len;
   }
 
-  set_component(
-      entities, entities->player_handle, velocity,
-      (.x_velocity = dx * PLAYER_SPEED, .y_velocity = dy * PLAYER_SPEED));
+  if (entities->has_player) {
+    set_component(
+        entities, entities->client_player_handle, velocity,
+        (.x_velocity = dx * PLAYER_SPEED, .y_velocity = dy * PLAYER_SPEED));
+  }
 
   if (ttec_key_pressed(&entities->cengine, &entities->keymap,
                        open_esc_menu_key)) {
@@ -389,7 +331,30 @@ static ui_result_e system_ui(tt_entity_manager_t *entities) {
   return res;
 }
 
+static void sync_entities(tt_entity_manager_t *entities,
+                          mygame_packet_sync_entities_t *se_packet) {
+  if (se_packet->entities_amount > MAX_ENTITIES_AMOUNT) {
+    log_error("Attempted syncing too many entities");
+    return;
+  }
+
+#define COMP_COPY(ty, name, ...)                                               \
+  memcpy(entities->name, se_packet->name,                                      \
+         sizeof(ty) * se_packet->entities_amount);
+  _COMPONENTS_ITER(COMP_COPY)
+#undef COMP_COPY
+}
+
+static void player_init(tt_entity_manager_t *entities, tt_entity_t player) {
+  set_component(entities, player, position, (.x = 0, .y = 0));
+  set_component(entities, player, box, (.width = 8, .height = 12, .depth = 4));
+  set_component(entities, player, texture, (.texture = player_tex));
+}
+
 static bool system_client_packets(tt_entity_manager_t *entities) {
+  pthread_mutex_lock(&entities->cengine.client_connection.packet_queue_mutex);
+  tt_packet_queue_log(&entities->cengine.client_connection.packet_data_queue);
+  pthread_mutex_unlock(&entities->cengine.client_connection.packet_queue_mutex);
   tt_packet_t packet;
   while (ttec_packet_pop(&entities->cengine, &packet, NULL, entities)) {
     log_debug("[CLIENT] Received Packet: %zu", packet.packet_id);
@@ -399,8 +364,55 @@ static bool system_client_packets(tt_entity_manager_t *entities) {
     case MYGAME_PACKET_HANDSHAKE_REQ: {
     } break;
     case MYGAME_PACKET_HANDSHAKE_ACCEPT: {
+      pthread_rwlock_wrlock(
+          &entities->cengine.client_connection.connection_rwlock);
+      entities->cengine.client_connection.client_id =
+          ((mygame_packet_handshake_accept_t *)packet.payload)->client_id;
+      pthread_rwlock_unlock(
+          &entities->cengine.client_connection.connection_rwlock);
+      log_info("client accepted");
+
+      // Reset entity manager
+      entities->entities_amount = 0;
+      entities->client_player_handle = 0;
+      entities->has_player = false;
+      log_info("Reset entity manager");
     } break;
     case MYGAME_PACKET_HANDSHAKE_REJECT: {
+      log_info("client rejected");
+    } break;
+    case MYGAME_PACKET_SYNC_ENTITIES: {
+      log_info(
+          "Synced entities: cur entities: %zu, payload entities: %zu",
+          entities->entities_amount,
+          ((mygame_packet_sync_entities_t *)packet.payload)->entities_amount);
+      sync_entities(entities, packet.payload);
+    } break;
+    case MYGAME_PACKET_CREATE_PLAYER: {
+      mygame_packet_create_player_t *payload = packet.payload;
+      pthread_rwlock_rdlock(
+          &entities->cengine.client_connection.connection_rwlock);
+      u64 client_id = entities->cengine.client_connection.client_id;
+      pthread_rwlock_unlock(
+          &entities->cengine.client_connection.connection_rwlock);
+
+      // Latest entity is player, otherwise its out of sync
+      tt_entity_t player_entity = tt_entity_make(entities);
+      if (player_entity != payload->player_id) {
+        log_error(
+            "Entities on server and client are out of sync: client-player-id: "
+            "%zu, server-player-id: %zu, client-entities-amount: %zu",
+            player_entity, payload->player_id, entities->entities_amount);
+        break;
+      }
+      player_init(entities, player_entity);
+
+      if (client_id == payload->client_id) {
+        log_debug("Creating player self");
+        entities->client_player_handle = player_entity;
+        entities->has_player = true;
+      }
+
     } break;
     }
   }
@@ -416,6 +428,10 @@ static void packets_add(tt_packet_info_array_t *packet_infos) {
                      mygame_packet_infos[MYGAME_PACKET_HANDSHAKE_ACCEPT]);
   tt_packet_info_add(packet_infos,
                      mygame_packet_infos[MYGAME_PACKET_HANDSHAKE_REJECT]);
+  tt_packet_info_add(packet_infos,
+                     mygame_packet_infos[MYGAME_PACKET_SYNC_ENTITIES]);
+  tt_packet_info_add(packet_infos,
+                     mygame_packet_infos[MYGAME_PACKET_CREATE_PLAYER]);
 
   tt_packet_info_lock(packet_infos);
 }
@@ -457,6 +473,7 @@ static i32 server_run(void) {
       } break;
       case MYGAME_PACKET_HANDSHAKE_REQ: {
         mygame_packet_handshake_req_t *payload = packet.payload;
+        log_info("Received handshake from client");
         if (payload->protocol_version != PROTOCOL_VERSION) {
           log_warn(
               "Client with invalid protocol version %zu attempted to connect",
@@ -470,21 +487,66 @@ static i32 server_run(void) {
 
           tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender,
                                 reject_packet, &entity_manager);
+
+          // TODO: Remove connected client and poll client
         } else {
           log_info("Accepted Client %s", payload->player_name);
 
           tt_packet_t accept_packet = {0};
-          mygame_packet_handshake_accept_t accept_payload = {.client_id = 0};
+
+          mygame_packet_handshake_accept_t accept_payload = {
+              .client_id = packet_ctx.client_id,
+          };
           ttes_packet_init(&entity_manager.sengine, &accept_packet,
                            MYGAME_PACKET_HANDSHAKE_ACCEPT, &accept_payload);
 
           tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender,
                                 accept_packet, &entity_manager);
+
+          tt_packet_t sync_packet = {0};
+#define COMP_COPY(ty, name, ...)                                               \
+  sync_entities_payload.name =                                                 \
+      heap_alloc(sizeof(ty) * entity_manager.entities_amount);                 \
+  memcpy(sync_entities_payload.name, entity_manager.name,                      \
+         sizeof(ty) * entity_manager.entities_amount);
+
+          mygame_packet_sync_entities_t sync_entities_payload = {
+              .entities_amount = entity_manager.entities_amount,
+          };
+          _COMPONENTS_ITER(COMP_COPY)
+
+          ttes_packet_init(&entity_manager.sengine, &sync_packet,
+                           MYGAME_PACKET_SYNC_ENTITIES, &sync_entities_payload);
+
+          log_debug("Sent packet for syncing %zu entities",
+                    entity_manager.entities_amount);
+
+          tt_packet_send_client(&entity_manager.sengine, packet_ctx.sender,
+                                sync_packet, &entity_manager);
+
+          // Create player
+          tt_entity_t player = tt_entity_make(&entity_manager);
+          player_init(&entity_manager, player);
+
+          tt_packet_t create_player = {0};
+          mygame_packet_create_player_t create_player_payload = {
+              .client_id = packet_ctx.client_id,
+              .player_id = player,
+              .player_name = payload->player_name,
+          };
+
+          ttes_packet_init(&entity_manager.sengine, &create_player,
+                           MYGAME_PACKET_CREATE_PLAYER, &create_player_payload);
+
+          tt_packet_send_all_clients(&entity_manager.sengine, create_player,
+                                     &entity_manager);
         }
       } break;
-      case MYGAME_PACKET_HANDSHAKE_ACCEPT: {
-      } break;
-      case MYGAME_PACKET_HANDSHAKE_REJECT: {
+      case MYGAME_PACKET_HANDSHAKE_ACCEPT:
+      case MYGAME_PACKET_HANDSHAKE_REJECT:
+      case MYGAME_PACKET_SYNC_ENTITIES: {
+        log_error("Received client packet with id: %zu on server",
+                  packet.packet_id);
       } break;
       }
     }
@@ -624,12 +686,10 @@ static i32 client_run(void) {
   crate_tex = tt_asset_bind(assets, "tex/crate.png");
 
   tt_entity_t _player = tt_entity_make(&entity_manager);
-  set_component(&entity_manager, _player, position, (.x = 0, .y = 0));
-  set_component(&entity_manager, _player, box,
-                (.width = 8, .height = 12, .depth = 4));
-  set_component(&entity_manager, _player, texture, (.texture = player_tex));
+  player_init(&entity_manager, _player);
 
-  entity_manager.player_handle = _player;
+  entity_manager.client_player_handle = _player;
+  entity_manager.has_player = true;
 
   bool running = true;
 
@@ -672,13 +732,17 @@ static i32 client_run(void) {
 
     system_velocity(&entity_manager);
 
-    if (entity_manager.c_position[entity_manager.player_handle].present) {
+    if (entity_manager.has_player &&
+        entity_manager.c_position[entity_manager.client_player_handle]
+            .present) {
       entity_manager.camera.target_x =
           player_x(&entity_manager) +
-          entity_width(&entity_manager, entity_manager.player_handle) / 2;
+          entity_width(&entity_manager, entity_manager.client_player_handle) /
+              2;
       entity_manager.camera.target_y =
           player_y(&entity_manager) +
-          entity_height(&entity_manager, entity_manager.player_handle) / 2;
+          entity_height(&entity_manager, entity_manager.client_player_handle) /
+              2;
     } else {
       entity_manager.camera.target_x =
           ttb_screen_width(entity_manager.cengine.backend) / 2;
@@ -693,7 +757,7 @@ static i32 client_run(void) {
     ttb_render(entity_manager.cengine.backend,
                (ttb_render_cmd_t){.cmd_id = TTB_RENDER_CMD_CLEAR,
                                   .cmd_data.cmd_clear.bg_color =
-                                      color_make(255, 255, 255, 255)});
+                                      color_make(200, 200, 200, 255)});
 
     ttb_render(entity_manager.cengine.backend,
                (ttb_render_cmd_t){

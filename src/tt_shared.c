@@ -24,16 +24,18 @@ static void tt_packet_init(allocator_t *alloc, tt_packet_t *packet,
   packet->payload = alloc->alloc(alloc, packet_info.payload_size);
 }
 
-tt_connection_status_e tt_handle_connection(addr_t recv_addr,
-                          pthread_mutex_t *packet_queue_mutex,
-                          tt_packet_queue_t *packet_data_queue) {
+tt_connection_status_e
+tt_handle_connection(addr_t recv_addr, u64 client_id, pthread_mutex_t *packet_queue_mutex,
+                     tt_packet_queue_t *packet_data_queue) {
   u8 len_buf[8] = {0};
   i64 len_res = sockets_receive(recv_addr, len_buf, 8);
   if (len_res == 0) {
     return TT_CONNECTION_CLOSED;
   }
   if (len_res != 8) {
-    log_error("Failed to receive packet len, received %ld bytes, but expected 8 bytes for payload length", len_res);
+    log_error("Failed to receive packet len, received %ld bytes, but expected "
+              "8 bytes for payload length",
+              len_res);
     return TT_CONNECTION_ILLEGAL_PACKET;
   }
 
@@ -56,7 +58,7 @@ tt_connection_status_e tt_handle_connection(addr_t recv_addr,
   log_debug("Bytebuf len after recv payload: %zu", len);
 
   struct tt_packet_queue_entry entry = {.packet_bytes = bytebuf,
-                                        .packet_ctx.sender = recv_addr};
+                                        .packet_ctx = {.sender = recv_addr, .client_id = client_id}};
   pthread_mutex_lock(packet_queue_mutex);
   deque_push_back(*packet_data_queue, entry);
   pthread_mutex_unlock(packet_queue_mutex);

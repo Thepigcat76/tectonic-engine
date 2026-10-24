@@ -11,8 +11,8 @@ typedef struct {
   bool present;
 } component_pos_t;
 
-static void component_pos_encode(const component_pos_t *comp, tt_byte_buf_t *buf,
-                                 void *encode_ctx) {
+static void component_pos_encode(const component_pos_t *comp,
+                                 tt_byte_buf_t *buf, void *encode_ctx) {
   tt_byte_buf_write(buf, comp->present);
   if (comp->present) {
     tt_encode_i32(comp->x, buf, encode_ctx);
@@ -37,8 +37,8 @@ typedef struct {
   bool present;
 } component_box_t;
 
-static void component_box_encode(const component_box_t *comp, tt_byte_buf_t *buf,
-                                 void *encode_ctx) {
+static void component_box_encode(const component_box_t *comp,
+                                 tt_byte_buf_t *buf, void *encode_ctx) {
   tt_byte_buf_write(buf, comp->present);
   if (comp->present) {
     tt_encode_i32(comp->width, buf, encode_ctx);
@@ -64,6 +64,24 @@ typedef struct {
   bool present;
 } component_velocity_t;
 
+static void component_velocity_encode(const component_velocity_t *comp,
+                                      tt_byte_buf_t *buf, void *encode_ctx) {
+  tt_byte_buf_write(buf, comp->present);
+  if (comp->present) {
+    tt_encode_i32(comp->x_velocity, buf, encode_ctx);
+    tt_encode_i32(comp->y_velocity, buf, encode_ctx);
+  }
+}
+
+static void component_velocity_decode(component_velocity_t *comp,
+                                      tt_byte_buf_t *buf, void *encode_ctx) {
+  comp->present = tt_byte_buf_read(buf);
+  if (comp->present) {
+    comp->x_velocity = tt_decode_i32(buf, encode_ctx);
+    comp->y_velocity = tt_decode_i32(buf, encode_ctx);
+  }
+}
+
 // TODO: Float encoding/decoding
 
 typedef struct {
@@ -72,11 +90,38 @@ typedef struct {
   bool present;
 } component_texture_t;
 
+static void component_texture_encode(const component_texture_t *comp,
+                                     tt_byte_buf_t *buf, void *encode_ctx) {
+  tt_byte_buf_write(buf, comp->present);
+}
+
+static void component_texture_decode(component_texture_t *comp,
+                                     tt_byte_buf_t *buf, void *encode_ctx) {
+  comp->present = tt_byte_buf_read(buf);
+}
+
 typedef enum {
   ENTITY_KIND_PLAYER,
+  ENTITY_KIND_CRATE,
 } entity_kind_t;
 
 typedef struct {
   entity_kind_t entity_kind;
   bool present;
 } component_entity_kind_t;
+
+static void component_entity_kind_encode(const component_entity_kind_t *comp,
+                                         tt_byte_buf_t *buf, void *encode_ctx) {
+  tt_byte_buf_write(buf, comp->present);
+  if (comp->present) {
+    tt_encode_i32(comp->entity_kind, buf, encode_ctx);
+  }
+}
+
+static void component_entity_kind_decode(component_entity_kind_t *comp,
+                                         tt_byte_buf_t *buf, void *encode_ctx) {
+  comp->present = tt_byte_buf_read(buf);
+  if (comp->present) {
+    comp->entity_kind = tt_decode_i32(buf, encode_ctx);
+  }
+}

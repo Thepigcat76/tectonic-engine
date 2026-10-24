@@ -11,7 +11,7 @@ typedef enum {
 } tt_connection_status_e;
 
 tt_connection_status_e
-tt_handle_connection(addr_t recv_addr, pthread_mutex_t *packet_queue_mutex,
+tt_handle_connection(addr_t recv_addr, u64 client_id, pthread_mutex_t *packet_queue_mutex,
                      tt_packet_queue_t *packet_data_queue);
 
 bool tt_packet_queue_pop(tt_packet_info_array_t *packet_infos,

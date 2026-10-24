@@ -85,6 +85,7 @@ typedef enum tt_client_state {
 #ifndef _CUSTOM_CLIENT_CONNECTION_IMPL
 struct tt_client_connection {
   addr_t server_addr;
+  u64 client_id;
 
   pthread_rwlock_t connection_rwlock;
 

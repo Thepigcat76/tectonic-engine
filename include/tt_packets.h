@@ -56,6 +56,7 @@ typedef struct tt_packet {
 
 typedef struct tt_packet_context {
   addr_t sender;
+  u64 client_id;
 } tt_packet_context_t;
 
 struct tt_packet_queue_entry {
@@ -64,6 +65,8 @@ struct tt_packet_queue_entry {
 };
 
 typedef deque_t(struct tt_packet_queue_entry) tt_packet_queue_t;
+
+void tt_packet_queue_log(const tt_packet_queue_t *packet_queue);
 
 // TODO: Check packet dir
 
