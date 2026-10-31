@@ -2,6 +2,7 @@
 
 #include "tt_shared.h"
 
+#include "lilc/bump.h"
 #include "lilc/dynstr.h"
 #include "lilc/deque.h"
 
@@ -50,8 +51,9 @@ typedef struct {
   i32 max_height;
   bool finished;
 
+  bool debug;
+
   bump_t elem_bump;
-  allocator_t elem_alloc;
 } ttui_layout_t;
 
 void ttui_layout_finish(tt_backend_t *backend, ttui_layout_t *layout);
@@ -72,10 +74,10 @@ typedef struct {
 
 void ttui_set_config(tt_asset_manager_t *assets, ttui_config_t config);
 
-void ttui_set_config_default(tt_asset_manager_t *assets);
+void ttui_set_config_default(tt_asset_manager_t *assets, const char *tex_path);
 
 bool ttui_button(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text, i32 x, i32 y, i32 width, i32 height, bool mouse_released);
 
-void ttui_label(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text, i32 x, i32 y, i32 width, i32 height);
+void ttui_label(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text, i32 x, i32 y, i32 width, i32 height, bool background);
 
 void ttui_text_box(tt_backend_t *backend, ttui_layout_t *layout, dyn_string_t *text_buf, i32 x, i32 y, i32 width, i32 height, i32 max_lines);

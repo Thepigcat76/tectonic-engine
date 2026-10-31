@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tt_shared.h"
-#include "lilc/alloc.h"
+#include "lilc/bump.h"
 #include "lilc/dynstr.h"
 #include "lilc/array.h"
 
@@ -78,7 +78,7 @@ typedef struct tt_asset_handle {
 
 #ifndef _CUSTOM_ASSET_MANAGER_IMPL
 struct tt_asset_manager {
-  const char *assets_path;
+  array_t(char *) asset_paths;
 
   tt_asset_texture_t *textures;
   tt_asset_sound_t *sounds;
@@ -86,16 +86,16 @@ struct tt_asset_manager {
   tt_asset_music_t *musics;
 
   bump_t asset_bump;
-  allocator_t asset_allocator;
 
   tt_asset_handle_t *asset_handles;
 
   bump_t asset_handle_bump;
-  allocator_t asset_handle_allocator;
 
   tt_backend_t *backend;
 };
 #endif
+
+void tt_assets_add_asset_path(tt_asset_manager_t *assets, const char *asset_path);
 
 void tt_assets_load(tt_asset_manager_t *assets);
 

@@ -1,12 +1,13 @@
-#include <lilc/dynstr.h>
-#include <lilc/log.h>
 #define LILSOCKETS_IMPL
 #include "../include/tt_engine.h"
 #include "lilc/alloc.h"
 #include "lilc/array.h"
 #include "lilc/deque.h"
+#include "lilc/dynstr.h"
+#include "lilc/log.h"
 #include "lilc/panic.h"
 #include "lilsockets.h"
+#include "tt_internal_shared.h"
 #include <pthread.h>
 
 void tt_client_connection_init(tt_client_connection_t *client_connection) {
@@ -19,8 +20,6 @@ void tt_client_connection_init(tt_client_connection_t *client_connection) {
   pthread_mutex_init(&client_connection->packet_queue_mutex, NULL);
 
   bump_init(&client_connection->packet_bump, 16000);
-  bump_allocator_init(&client_connection->packet_alloc,
-                      &client_connection->packet_bump);
 
   client_connection->packet_infos.infos =
       array_new(tt_packet_info_t, &HEAP_ALLOCATOR);
@@ -42,12 +41,14 @@ void tt_server_init(tt_server_t *server, bool integrated) {
       array_new_capacity(tt_client_desc_t, 256, &HEAP_ALLOCATOR);
   server->poll_clients =
       array_new_capacity(poll_client_t, 256, &HEAP_ALLOCATOR);
+  pthread_mutex_init(&server->poll_clients_mutex, NULL);
 
   deque_init_cap(server->packet_data_queue, 256, &HEAP_ALLOCATOR);
   pthread_mutex_init(&server->packet_queue_mutex, NULL);
 
+  deque_init_cap(server->removed_clients, 256, &HEAP_ALLOCATOR);
+
   bump_init(&server->packet_bump, 16000);
-  bump_allocator_init(&server->packet_alloc, &server->packet_bump);
 
   server->packet_infos.infos = array_new(tt_packet_info_t, &HEAP_ALLOCATOR);
   server->packet_infos.locked = false;
@@ -55,6 +56,7 @@ void tt_server_init(tt_server_t *server, bool integrated) {
 
 void tt_server_deinit(tt_server_t *server) {
   deque_deinit(server->packet_data_queue);
+  deque_deinit(server->removed_clients);
   bump_free(&server->packet_bump);
   array_free(server->packet_infos.infos);
 
@@ -101,51 +103,100 @@ void tt_decode_packet(tt_packet_t *packet, tt_packet_info_t info,
   info.decode_func(packet, buf, decode_ctx);
 }
 
-void tt_packet_send_client(tt_engine_server_t *srvr_engine, addr_t client_addr,
-                           tt_packet_t packet, void *encode_ctx) {
-  pthread_rwlock_wrlock(&srvr_engine->server.server_lock);
+static void tt_send_packet_clients(addr_t *addresses, usz addresses_size,
+                                   tt_packet_t *packet,
+                                   tt_packet_info_t *packet_info,
+                                   void *encode_ctx, tt_side_e side) {
   tt_byte_buf_t byte_buf = {0};
-  tt_byte_buf_init(&byte_buf, &srvr_engine->server.packet_alloc, 256);
+  tt_byte_buf_init(&byte_buf, &HEAP_ALLOCATOR, 1024);
 
-  tt_encode_packet(&packet,
-                   srvr_engine->server.packet_infos.infos[packet.packet_id],
-                   &byte_buf, encode_ctx);
-
+  tt_encode_packet(packet, *packet_info, &byte_buf, encode_ctx);
   u64 bytebuf_len = tt_byte_buf_len(&byte_buf);
 
-  sockets_send(client_addr, &bytebuf_len, sizeof(u64));
-  sockets_send(client_addr, byte_buf.bytes, bytebuf_len);
+  for (usz i = 0; i < addresses_size; i++) {
+    sockets_send(addresses[i], &bytebuf_len, sizeof(u64));
+    sockets_send(addresses[i], byte_buf.bytes, bytebuf_len);
+  }
+
+  tt_byte_buf_deinit(&byte_buf);
+
+  char *side_lit = side == TT_SIDE_CLIENT ? "CLIENT" : "SERVER";
+  char *packet_name = NULL;
+  if (packet_info != NULL) {
+    packet_name = packet_info->packet_name;
+  }
+
+  if (packet_name != NULL) {
+    log_info("[%s] Sent Packet %s", side_lit, packet_name);
+  } else {
+    log_info("[%s] Sent Packet %zu", side_lit, packet->packet_id);
+  }
+}
+
+void tt_packet_send_client(tt_engine_server_t *srvr_engine, u64 client_id,
+                           tt_packet_t packet, void *encode_ctx) {
+  pthread_rwlock_rdlock(&srvr_engine->server.server_lock);
+  tt_packet_info_t packet_info =
+      srvr_engine->server.packet_infos.infos[packet.packet_id];
+  addr_t addr = srvr_engine->server.connected_clients[client_id].address;
   pthread_rwlock_unlock(&srvr_engine->server.server_lock);
+
+  if (packet_info.packet_dir != TT_PACKET_DIR_TWO_WAY &&
+      packet_info.packet_dir != TT_PACKET_DIR_CLIENT) {
+    log_warn("Tried sending packet %s with id %zu to client, even though it is "
+             "a server bound packet",
+             packet_info.packet_name, packet_info.packet_id);
+    return;
+  }
+
+  tt_send_packet_clients(&addr, 1, &packet, &packet_info, encode_ctx,
+                         TT_SIDE_SERVER);
 }
 
 void tt_packet_send_all_clients(tt_engine_server_t *srvr_engine,
                                 tt_packet_t packet, void *encode_ctx) {
+  pthread_rwlock_rdlock(&srvr_engine->server.server_lock);
+  tt_packet_info_t packet_info =
+      srvr_engine->server.packet_infos.infos[packet.packet_id];
+  pthread_rwlock_unlock(&srvr_engine->server.server_lock);
+
+  if (packet_info.packet_dir != TT_PACKET_DIR_TWO_WAY &&
+      packet_info.packet_dir != TT_PACKET_DIR_CLIENT) {
+    log_warn("Tried sending packet %s with id %zu to client, even though it is "
+             "a server bound packet",
+             packet_info.packet_name, packet_info.packet_id);
+    return;
+  }
+
+  usz len = array_len(srvr_engine->server.connected_clients);
+  addr_t addresses[len];
   tt_client_desc_t *client_desc;
   array_foreach(srvr_engine->server.connected_clients, client_desc) {
-    tt_packet_send_client(srvr_engine, client_desc->address, packet,
-                          encode_ctx);
+    addresses[_arr_foreach_idx] = client_desc->address;
   }
+
+  tt_send_packet_clients(addresses, len, &packet, &packet_info, encode_ctx,
+                         TT_SIDE_SERVER);
 }
 
 void tt_packet_send_server(tt_engine_client_t *client_engine,
                            tt_packet_t packet, void *encode_ctx) {
-  pthread_rwlock_wrlock(&client_engine->client_connection.connection_rwlock);
-  tt_byte_buf_t byte_buf = {0};
-  tt_byte_buf_init(&byte_buf, &client_engine->client_connection.packet_alloc,
-                   256);
-
-  tt_encode_packet(
-      &packet,
-      client_engine->client_connection.packet_infos.infos[packet.packet_id],
-      &byte_buf, encode_ctx);
-
-  u64 bytebuf_len = tt_byte_buf_len(&byte_buf);
-
-  sockets_send(client_engine->client_connection.server_addr, &bytebuf_len,
-               sizeof(u64));
-  sockets_send(client_engine->client_connection.server_addr, byte_buf.bytes,
-               bytebuf_len);
+  pthread_rwlock_rdlock(&client_engine->client_connection.connection_rwlock);
+  tt_packet_info_t packet_info =
+      client_engine->client_connection.packet_infos.infos[packet.packet_id];
+  addr_t server_addr = client_engine->client_connection.server_addr;
   pthread_rwlock_unlock(&client_engine->client_connection.connection_rwlock);
+
+  if (packet_info.packet_dir != TT_PACKET_DIR_TWO_WAY &&
+      packet_info.packet_dir != TT_PACKET_DIR_SERVER) {
+    log_warn("Tried sending packet %s with id %zu to server, even though it is "
+             "a client bound packet",
+             packet_info.packet_name, packet_info.packet_id);
+    return;
+  }
+
+  tt_send_packet_clients(&server_addr, 1, &packet, &packet_info, encode_ctx,
+                         TT_SIDE_CLIENT);
 }
 
 static void tt_encode_num(i64 num, u64 num_size, tt_byte_buf_t *buf,
@@ -223,7 +274,8 @@ void tt_encode_string(const char *string, tt_byte_buf_t *buf,
 void tt_decode_string(char **string, allocator_t *alloc, tt_byte_buf_t *buf,
                       void *decode_ctx) {
   usz len = tt_decode_i64(buf, decode_ctx);
-  if (len == 0) return;
+  if (len == 0)
+    return;
 
   if (string != NULL)
     *string = alloc->alloc(alloc, len + 1);

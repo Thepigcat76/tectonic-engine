@@ -10,40 +10,130 @@
 #include <stdbool.h>
 #include <strings.h>
 
-typedef enum ttb_event_id {
-  TTB_EVENT_WINDOW_CLOSED,
-  TTB_EVENT_WINDOW_RESIZED,
+typedef struct ttb_event ttb_event_t;
 
-  TTB_EVENT_KEYBOARD_INPUT,
-  TTB_EVENT_MOUSE_INPUT,
+// Create the backend data. This is usually handled by the engine
+tt_backend_t *tt_backend_make(allocator_t *alloc, tt_asset_manager_t *assets);
 
-  _amount_ttb_event_ids,
-} ttb_event_id_e;
+// Delete the backend data. This is usually handled by the engine
+void tt_backend_destroy(tt_backend_t *backend);
 
-typedef enum ttb_key_state {
-  TTB_KEY_STATE_PRESSED,
-  TTB_KEY_STATE_RELEASED,
-} ttb_key_state_t;
+// Get the number of fps
+i32 ttb_fps(tt_backend_t *backend);
 
-typedef enum {
-#define TTB_MOUSE_ITER(_F)                                                     \
-  _F(TTB_MOUSE_BUTTON_NULL)                                                    \
-  _F(TTB_MOUSE_BUTTON_LEFT)                                                    \
-  _F(TTB_MOUSE_BUTTON_RIGHT)                                                   \
-  _F(TTB_MOUSE_BUTTON_MIDDLE)
-#define ENUM_ITEM(name) name,
+// Get the frame rate
+f64 ttb_frame_time(tt_backend_t *backend);
 
-  TTB_MOUSE_ITER(ENUM_ITEM)
+// Convert a screen coordinate's x-value to a world-space x-value using the
+// current camera
+i32 ttb_screen_to_cam_x(tt_backend_t *backend, i32 x, const tt_camera_t *cam);
 
-      _amount_ttb_mouse_btns,
-} ttb_mouse_button_e;
+// Convert a screen coordinate's y-value to a world-space y-value using the
+// current camera
+i32 ttb_screen_to_cam_y(tt_backend_t *backend, i32 y, const tt_camera_t *cam);
 
-typedef struct ttb_event_mouse_input {
-  ttb_mouse_button_e button;
-  ttb_key_state_t left_button;
-  ttb_key_state_t right_button;
-  ttb_key_state_t middle_button;
-} ttb_event_mouse_input_t;
+// Get the width of a text for a specific font
+u32 ttb_text_width(tt_backend_t *backend, const char *text, usz font_size);
+
+// Get the x-position of the mouse
+i32 ttb_mouse_x(tt_backend_t *backend);
+
+// Get the y-position of the mouse
+i32 ttb_mouse_y(tt_backend_t *backend);
+
+// Get the width of the screen
+i32 ttb_screen_width(tt_backend_t *backend);
+
+// Get the height of the screen
+i32 ttb_screen_height(tt_backend_t *backend);
+
+// Render all pushed render commands to the screen
+void _ttb_cmds_render(tt_backend_t *backend);
+
+// Load an asset at the given path of a specific category.
+// The 'prev' param provides additional context for assets like
+// previously loaded shaders with the same name of a different type.
+// Returns a pointer to the asset data, allocated with 'asset_alloc'
+void *ttb_asset_load(tt_backend_t *backend, allocator_t *asset_alloc,
+                     tt_asset_category_t category, const char *path,
+                     void *prev);
+
+// Unload an asset of a specific category. It is assumed that the asset was
+// allocated using 'asset_alloc'
+void ttb_asset_unload(tt_backend_t *backend, allocator_t *asset_alloc,
+                      tt_asset_category_t category, void *asset);
+
+// Poll current events. This must only be called once per frame, otherwise you
+// will get duplicate events in your queue. Polled events are stored in an
+// internal events queue and can be retrieved using 'ttb_event_pop' and
+// 'ttb_event_peek'
+void ttb_events_poll(tt_backend_t *backend);
+
+// Pop the last event of the event queue and write it to 'event'
+bool ttb_event_pop(tt_backend_t *backend, ttb_event_t *event);
+
+// Get the pointer to the last event of the event queue or NULL if the queue is
+// empty
+ttb_event_t *ttb_event_peek(tt_backend_t *backend);
+
+bool ttb_camera_make_id(tt_backend_t *backend, u64 *cam_id);
+
+typedef struct {
+  i32 width;
+  i32 height;
+  const char *title;
+  bool resizeable;
+} ttb_window_settings_t;
+
+// Open the native window with the given settings. Settings default to width:
+// 640, height: 640, title: "Engine Example", resizeable: false
+void ttb_open_window(tt_backend_t *backend, ttb_window_settings_t settings);
+
+typedef struct ttb_render_cmd {
+  enum ttb_render_cmd_id {
+    TTB_RENDER_CMD_TEXTURE,
+    TTB_RENDER_CMD_RECTANGLE,
+    TTB_RENDER_CMD_TEXT,
+    TTB_RENDER_CMD_APPLY_CAM,
+    TTB_RENDER_CMD_UNAPPLY_CAM,
+    TTB_RENDER_CMD_CLEAR,
+  } cmd_id;
+  union ttb_render_cmd_data {
+    struct ttb_cmd_tex {
+      tt_asset_id_t texture;
+      f32 rotation;
+      tt_rect_t atlas_src;
+      tt_rect_t dest;
+      color_t tint_color;
+    } cmd_tex;
+    struct ttb_cmd_rect {
+      tt_rect_t rectangle;
+      color_t color;
+      bool outline_only;
+    } cmd_rect;
+    struct ttb_cmd_text {
+      // TODO: Custom fonts
+      i32 font_size;
+      const char *text;
+      color_t text_color;
+      i32 x;
+      i32 y;
+    } cmd_text;
+    struct ttb_cmd_apply_camera {
+      tt_camera_t cam;
+    } cmd_apply_cam;
+    struct ttb_cmd_unapply_camera {
+      u64 cam_id;
+    } cmd_unapply_cam;
+    struct ttb_cmd_clear {
+      color_t bg_color;
+    } cmd_clear;
+  } cmd_data;
+} ttb_render_cmd_t;
+
+// Push 'render_cmd' to the internal render_cmd array to be rendered with
+// '_ttb_cmds_render'
+void ttb_render(tt_backend_t *backend, ttb_render_cmd_t render_cmd);
 
 typedef enum ttb_keyboard_key {
 #define TTB_KEYBOARD_ITER(_F)                                                  \
@@ -166,12 +256,55 @@ typedef enum ttb_keyboard_key {
   _F(TTB_KEY_NUMPAD_DIVIDE)                                                    \
   _F(TTB_KEY_NUMPAD_DECIMAL)                                                   \
   _F(TTB_KEY_NUMPAD_ENTER)
+#define ENUM_ITEM(name) name,
 
   TTB_KEYBOARD_ITER(ENUM_ITEM)
 
       _amount_ttb_keys,
 #undef ENUM_ITEM
 } ttb_keyboard_key_e;
+
+// Check if a specific key is held down. To check for key pressing and
+// releasing, use events
+bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key);
+
+typedef enum {
+#define TTB_MOUSE_ITER(_F)                                                     \
+  _F(TTB_MOUSE_BUTTON_NULL)                                                    \
+  _F(TTB_MOUSE_BUTTON_LEFT)                                                    \
+  _F(TTB_MOUSE_BUTTON_RIGHT)                                                   \
+  _F(TTB_MOUSE_BUTTON_MIDDLE)
+#define ENUM_ITEM(name) name,
+
+  TTB_MOUSE_ITER(ENUM_ITEM)
+
+      _amount_ttb_mouse_btns,
+#undef ENUM_ITEM
+} ttb_mouse_button_e;
+
+// Check if a specific mouse button is held down. To check for mouse button pressing and
+// releasing, use events
+bool ttb_mouse_down(tt_backend_t *backend, ttb_mouse_button_e btn);
+
+typedef enum ttb_event_id {
+  TTB_EVENT_WINDOW_CLOSED,
+  TTB_EVENT_WINDOW_RESIZED,
+
+  TTB_EVENT_KEYBOARD_INPUT,
+  TTB_EVENT_MOUSE_INPUT,
+
+  _amount_ttb_event_ids,
+} ttb_event_id_e;
+
+typedef enum ttb_key_state {
+  TTB_KEY_STATE_NONE,
+  TTB_KEY_STATE_PRESSED,
+  TTB_KEY_STATE_RELEASED,
+} ttb_key_state_t;
+
+typedef struct ttb_event_mouse_input {
+  ttb_key_state_t buttons[_amount_ttb_mouse_btns];
+} ttb_event_mouse_input_t;
 
 static ttb_keyboard_key_e ttb_key_from_str(const char *key_str) {
 #define STR_CASE(name)                                                         \
@@ -218,7 +351,7 @@ typedef struct ttb_event_keyboard_input {
   ttb_keyboard_key_e key;
 } ttb_event_keyboard_input_t;
 
-typedef struct ttb_event {
+struct ttb_event {
   ttb_event_id_e event_id;
   union ttb_event_data {
     struct ttb_event_resized {
@@ -228,102 +361,10 @@ typedef struct ttb_event {
     ttb_event_keyboard_input_t evt_keyboard_input;
     ttb_event_mouse_input_t evt_mouse_input;
   } event_data;
-} ttb_event_t;
+};
 
 typedef deque_t(ttb_event_t) ttb_event_deque_t;
-
-tt_backend_t *tt_backend_make(allocator_t *alloc, tt_asset_manager_t *assets);
-
-void tt_backend_destroy(tt_backend_t *backend);
-
-typedef struct ttb_render_cmd {
-  enum ttb_render_cmd_id {
-    TTB_RENDER_CMD_TEXTURE,
-    TTB_RENDER_CMD_RECTANGLE,
-    TTB_RENDER_CMD_TEXT,
-    TTB_RENDER_CMD_APPLY_CAM,
-    TTB_RENDER_CMD_UNAPPLY_CAM,
-    TTB_RENDER_CMD_CLEAR,
-  } cmd_id;
-  union ttb_render_cmd_data {
-    struct ttb_cmd_tex {
-      tt_asset_id_t texture;
-      f32 rotation;
-      tt_rect_t atlas_src;
-      tt_rect_t dest;
-      color_t tint_color;
-    } cmd_tex;
-    struct ttb_cmd_rect {
-      tt_rect_t rectangle;
-      color_t color;
-      bool outline_only;
-    } cmd_rect;
-    struct ttb_cmd_text {
-      // TODO: Custom fonts
-      i32 font_size;
-      const char *text;
-      color_t text_color;
-      i32 x;
-      i32 y;
-    } cmd_text;
-    struct ttb_cmd_apply_camera {
-      tt_camera_t cam;
-    } cmd_apply_cam;
-    struct ttb_cmd_unapply_camera {
-      u64 cam_id;
-    } cmd_unapply_cam;
-    struct ttb_cmd_clear {
-      color_t bg_color;
-    } cmd_clear;
-  } cmd_data;
-} ttb_render_cmd_t;
 
 typedef enum ttb_render_cmd_id ttb_render_cmd_id_t;
 
 typedef union ttb_render_cmd_data ttb_render_cmd_data_t;
-
-i32 ttb_fps(tt_backend_t *backend);
-
-f64 ttb_frame_time(tt_backend_t *backend);
-
-i32 ttb_screen_to_cam_x(tt_backend_t *backend, i32 x, const tt_camera_t *cam);
-
-i32 ttb_screen_to_cam_y(tt_backend_t *backend, i32 y, const tt_camera_t *cam);
-
-u32 ttb_text_width(tt_backend_t *backend, const char *text, usz font_size);
-
-void ttb_render(tt_backend_t *backend, ttb_render_cmd_t render_cmd);
-
-bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key);
-
-bool ttb_mouse_down(tt_backend_t *backend, ttb_mouse_button_e btn);
-
-i32 ttb_mouse_x(tt_backend_t *backend);
-
-i32 ttb_mouse_y(tt_backend_t *backend);
-
-i32 ttb_screen_width(tt_backend_t *backend);
-
-i32 ttb_screen_height(tt_backend_t *backend);
-
-bool ttb_camera_make_id(tt_backend_t *backend, u64 *cam_id);
-
-void _ttb_cmds_render(tt_backend_t *backend);
-
-void _ttb_keys_update(tt_backend_t *backend);
-
-// prev param is used for stuff like shaders that might have multiple variants
-void *ttb_asset_load(tt_backend_t *backend, allocator_t *asset_alloc,
-                     tt_asset_category_t category, const char *path,
-                     void *prev);
-
-void ttb_asset_unload(tt_backend_t *backend, allocator_t *asset_alloc,
-                      tt_asset_category_t category, void *asset);
-
-bool ttb_window_should_close(tt_backend_t *backend);
-
-void ttb_events_poll(tt_backend_t *backend);
-
-bool ttb_event_pop(tt_backend_t *backend, ttb_event_t *event);
-
-ttb_event_t *ttb_event_peek(tt_backend_t *backend);

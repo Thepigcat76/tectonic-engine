@@ -1,5 +1,5 @@
 #include "../include/tt_data.h"
-#include "../vendor/cJSON.h"
+#include "../../vendor/cJSON.h"
 #include "lilc/alloc.h"
 #include "lilc/dynstr.h"
 #include "lilc/file.h"

@@ -1,14 +1,12 @@
 #pragma once
 
-#include "lilc/alloc.h"
 #include "lilc/array.h"
 #include "lilc/bump.h"
-#include "lilc/deque.h"
 #include "lilsockets.h"
-#include "tt_assets.h"
-#include "tt_keys.h"
 #include "tt_packets.h"
 #include "tt_shared.h"
+#include "tt_backend.h"
+#include "tt_assets.h"
 #include <pthread.h>
 
 typedef struct tt_subproc_info {
@@ -19,8 +17,7 @@ typedef struct tt_subproc_info {
 
 // -- NETWORKING --
 
-// TODO: Change direct addr to id
-void tt_packet_send_client(tt_engine_server_t *srvr_engine, addr_t client_addr,
+void tt_packet_send_client(tt_engine_server_t *srvr_engine, u64 client_id,
                            tt_packet_t packet, void *encode_ctx);
 
 void tt_packet_send_all_clients(tt_engine_server_t *srvr_engine,
@@ -52,7 +49,10 @@ struct tt_server {
   pthread_rwlock_t server_lock;
   addr_t address;
 
+  deque_t(tt_client_desc_t) removed_clients;
+
   array_t(poll_client_t) poll_clients;
+  pthread_mutex_t poll_clients_mutex;
 
   tt_server_state_e state;
 
@@ -66,7 +66,6 @@ struct tt_server {
   tt_packet_info_array_t packet_infos;
 
   bump_t packet_bump;
-  allocator_t packet_alloc;
 };
 #endif
 
@@ -97,7 +96,6 @@ struct tt_client_connection {
   tt_packet_info_array_t packet_infos;
 
   bump_t packet_bump;
-  allocator_t packet_alloc;
 };
 #endif
 
@@ -129,17 +127,9 @@ struct tt_engine_client {
   tt_client_connection_t client_connection;
 
   bump_t event_bump;
-  allocator_t event_alloc;
 };
 
-typedef struct tt_engine_init {
-  i32 window_width;
-  i32 window_height;
-  const char *window_title;
-  bool resizeable;
-} tt_engine_init_t;
-
-void ttec_init(tt_engine_client_t *engine, tt_engine_init_t init_state);
+void ttec_init(tt_engine_client_t *engine);
 
 void ttec_load_assets(tt_engine_client_t *engine);
 

@@ -1,7 +1,7 @@
 #include "../include/tt_keys.h"
 #include "../include/tt_engine.h"
 #include "../include/tt_toml.h"
-#include "../vendor/toml.h"
+#include "../../vendor/toml.h"
 #include "lilc/alloc.h"
 #include "lilc/dynstr.h"
 #include "lilc/log.h"
@@ -87,7 +87,7 @@ static void tt_keybind_entry_visit(const char *key, const toml_datum_t *entry,
   if (key == NULL) {
     log_error("key is null");
     return;
-  } 
+  }
 
   const char *key_cpy = str_dup(key, keybinds->keymap_alloc);
 
@@ -96,13 +96,16 @@ static void tt_keybind_entry_visit(const char *key, const toml_datum_t *entry,
       .id = array_len(*keybinds->keymap),
   };
 
-  if (keybinds->load_default && toml_seek(*entry, "default").type != TOML_UNKNOWN) {
-    tt_key_load(entry, "default", &key_entry.default_kind, &key_entry.default_mouse_btn,
-                &key_entry.default_key, keybinds->keymap_alloc);
+  if (keybinds->load_default &&
+      toml_seek(*entry, "default").type != TOML_UNKNOWN) {
+    tt_key_load(entry, "default", &key_entry.default_kind,
+                &key_entry.default_mouse_btn, &key_entry.default_key,
+                keybinds->keymap_alloc);
   }
 
-  tt_key_load(entry, "selected", &key_entry.selected_kind, &key_entry.selected_mouse_btn,
-              &key_entry.selected_key, keybinds->keymap_alloc);
+  tt_key_load(entry, "selected", &key_entry.selected_kind,
+              &key_entry.selected_mouse_btn, &key_entry.selected_key,
+              keybinds->keymap_alloc);
 
   bool found_entry = false;
   tt_keymap_entry_t *entry_iter;
@@ -141,21 +144,18 @@ void tt_keymap_load(tt_keymap_t *keymap, const char *filepath,
   toml_datum_t *toml = &toml_result.toptab;
 
   struct tt_toml_keybinds_args args = {
-    .keymap = &keymap->entries,
-    .keymap_alloc = alloc,
-    .load_default = load_default,
+      .keymap = &keymap->entries,
+      .keymap_alloc = alloc,
+      .load_default = load_default,
   };
 
   tt_toml_table_visit_entries(NULL, toml, tt_keybind_entry_visit, &args, true);
-
 }
 
 void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath,
                     bool save_default) {
   bump_t toml_bump = {0};
   bump_init(&toml_bump, 16000);
-  allocator_t toml_alloc = {0};
-  bump_allocator_init(&toml_alloc, &toml_bump);
 
   toml_datum_t toml = mkdatum(TOML_TABLE);
 
@@ -163,7 +163,7 @@ void tt_keymap_save(const tt_keymap_t *keymap, const char *filepath,
 
   tt_keymap_entry_t *entry;
   array_foreach(keymap->entries, entry) {
-    char *toml_key = str_dup(entry->name, &toml_alloc);
+    char *toml_key = str_dup(entry->name, &toml_bump.alloc);
     toml_datum_t *val = toml_tab_emplace(&toml, toml_key, &errbuf);
     if (val == NULL) {
       log_error("Error placing value: %s", errbuf);
@@ -242,6 +242,7 @@ void tt_keymap_reset_key(tt_keymap_t *keymap, tt_keymap_id_t key_id) {
 
 bool ttec_key_pressed(tt_engine_client_t *engine, tt_keymap_t *keymap,
                       tt_keymap_id_t key_id) {
+  (void)engine;
   bool pressed = keymap->entries[key_id].pressed;
   keymap->entries[key_id].pressed = false;
   return pressed;
@@ -249,6 +250,7 @@ bool ttec_key_pressed(tt_engine_client_t *engine, tt_keymap_t *keymap,
 
 bool ttec_key_released(tt_engine_client_t *engine, tt_keymap_t *keymap,
                        tt_keymap_id_t key_id) {
+  (void)engine;
   bool released = keymap->entries[key_id].released;
   keymap->entries[key_id].released = false;
   return released;
@@ -271,6 +273,7 @@ bool ttec_key_up(tt_engine_client_t *engine, tt_keymap_t *keymap,
 void tt_keymap_handle_input_event(tt_engine_client_t *engine,
                                   tt_keymap_t *keymap,
                                   const ttb_event_t *event) {
+  (void)engine;
   if (event->event_id != TTB_EVENT_KEYBOARD_INPUT &&
       event->event_id != TTB_EVENT_MOUSE_INPUT) {
     log_error("Event is not an input event! Failed to handle");

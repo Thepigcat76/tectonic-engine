@@ -10,50 +10,23 @@
 #include <raylib.h>
 #include <stdio.h>
 
-void ttec_init(tt_engine_client_t *engine, tt_engine_init_t init_state) {
+void ttec_init(tt_engine_client_t *engine) {
   engine->backend = tt_backend_make(&HEAP_ALLOCATOR, &engine->asset_manager);
 
   bump_init(&engine->event_bump, 16000);
-  bump_allocator_init(&engine->event_alloc, &engine->event_bump);
 
-  engine->events = array_new(ttb_event_t, &engine->event_alloc);
-
-  // TODO: Move to backend
-
-  u32 window_flags = 0;
-
-  const char *window_title = init_state.window_title;
-  if (window_title == NULL) {
-    window_title = "Tectonic Engine Example";
-  }
-
-  i32 window_width = init_state.window_width;
-  if (window_width == 0) {
-    window_width = 640;
-  }
-
-  i32 window_height = init_state.window_height;
-  if (window_height == 0) {
-    window_height = 480;
-  }
-
-  if (init_state.resizeable) {
-    window_flags |= FLAG_WINDOW_RESIZABLE;
-  }
-
-  if (window_flags != 0) {
-    SetConfigFlags(window_flags);
-  }
-  InitWindow(window_width, window_height, window_title);
-
-  SetTargetFPS(60);
-  SetExitKey(KEY_NULL);
+  engine->events = array_new(ttb_event_t, &engine->event_bump.alloc);
 
   engine->asset_manager.asset_handles = NULL;
 
   engine->asset_manager.backend = engine->backend;
 
   tt_client_connection_init(&engine->client_connection);
+
+  if (!ttec_subproc_start(engine, TTEC_SUBPROC_PACKET_RECV)) {
+    log_error("Failed to start packet receiver on the client");
+    exit(EXIT_FAILURE);
+  }
 }
 
 void ttec_load_assets(tt_engine_client_t *engine) {
@@ -109,9 +82,9 @@ void ttec_packet_init(tt_engine_client_t *engine, tt_packet_t *packet,
   packet->packet_id = packet_id;
   pthread_rwlock_wrlock(&engine->client_connection.connection_rwlock);
   tt_client_connection_t *connection = &engine->client_connection;
-  packet->payload = connection->packet_alloc.alloc(
-      &connection->packet_alloc,
-      connection->packet_infos.infos[packet_id].payload_size);
+  packet->payload =
+      bump_alloc(&connection->packet_bump,
+                 connection->packet_infos.infos[packet_id].payload_size);
   memcpy(packet->payload, payload,
          connection->packet_infos.infos[packet_id].payload_size);
   pthread_rwlock_unlock(&engine->client_connection.connection_rwlock);
@@ -123,14 +96,23 @@ bool ttec_packet_pop(tt_engine_client_t *engine, tt_packet_t *packet,
       &engine->client_connection.packet_infos,
       &engine->client_connection.packet_data_queue,
       &engine->client_connection.packet_queue_mutex, packet, packet_ctx,
-      &engine->client_connection.packet_alloc, decode_ctx);
+      &engine->client_connection.packet_bump.alloc, decode_ctx);
 }
 
 // client connection rwlock is locked
 static tt_connection_status_e
-ttec_packet_recv(tt_client_connection_t *connection, addr_t server_addr, u64 client_id) {
-  return tt_handle_connection(server_addr, client_id, &connection->packet_queue_mutex,
-                              &connection->packet_data_queue);
+ttec_packet_recv(tt_client_connection_t *connection, addr_t server_addr,
+                 u64 client_id) {
+  struct tt_connection server_connection = {
+    .client_id = client_id,
+    .recv_addr = server_addr,
+    .side = TT_SIDE_CLIENT,
+    .connection_packets = &connection->packet_infos,
+    .packet_data_queue = &connection->packet_data_queue,
+    .packet_queue_mutex = &connection->packet_queue_mutex,
+  };
+
+  return tt_handle_connection(&server_connection);
 }
 
 void ttec_client_stop(tt_engine_client_t *engine) {
@@ -160,13 +142,18 @@ static void *ttec_packet_receiver_run(void *arg) {
         server_addr = connection->server_addr;
         pthread_rwlock_unlock(&connection->connection_rwlock);
       }
+      pthread_rwlock_rdlock(&connection->connection_rwlock);
+      u64 client_id = connection->client_id;
+      pthread_rwlock_unlock(&connection->connection_rwlock);
 
       // do stuff ...
-      pthread_rwlock_rdlock(&connection->connection_rwlock);
-      tt_connection_status_e status = ttec_packet_recv(connection, server_addr, connection->client_id);
+      tt_connection_status_e status =
+          ttec_packet_recv(connection, server_addr, client_id);
       switch (status) {
       case TT_CONNECTION_CLOSED: {
+        pthread_rwlock_wrlock(&connection->connection_rwlock);
         connection->state = TT_CLIENT_STOPPED;
+        pthread_rwlock_unlock(&connection->connection_rwlock);
       } break;
       case TT_CONNECTION_ILLEGAL_PACKET: {
         log_error("Failed to receive packet from server");
@@ -174,7 +161,6 @@ static void *ttec_packet_receiver_run(void *arg) {
       default: {
       } break;
       }
-      pthread_rwlock_unlock(&connection->connection_rwlock);
     } break;
     case TT_CLIENT_STOPPED: {
       server_addr = -1;

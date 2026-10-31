@@ -1,21 +1,19 @@
-#include "../include/tt_assets.h"
-#include "../include/tt_backend.h"
-#include "../include/tt_camera.h"
-#include "../include/tt_shared.h"
+#include "../../engine/include/tt_assets.h"
+#include "../../engine/include/tt_backend.h"
+#include "../../engine/include/tt_camera.h"
+#include "../../engine/include/tt_shared.h"
 #include "lilc/alloc.h"
 #include "lilc/array.h"
 #include "lilc/deque.h"
 #include "lilc/log.h"
 #include "lilc/todo.h"
 
-#include "raylib.h"
 #include "lilc/file.h"
+#include "raylib.h"
 
 struct tt_backend {
   ttb_render_cmd_t *render_cmds;
   ttb_event_t *event_queue;
-
-  u64 cameras_amount;
 
   tt_asset_manager_t *assets_manager;
 
@@ -29,6 +27,8 @@ struct tt_backend {
   // to update every frame
   bump_t render_cmd_bump;
   allocator_t render_cmd_alloc;
+
+  u64 cameras_amount;
 
   // Allocator for event queue and event related
   // data
@@ -58,8 +58,6 @@ tt_backend_t *tt_backend_make(allocator_t *alloc, tt_asset_manager_t *assets) {
   // reset it.
   deque_init(backend->event_queue, &backend->event_alloc);
 
-  backend->cameras_amount = 0;
-
   return backend;
 }
 
@@ -68,6 +66,39 @@ void tt_backend_destroy(tt_backend_t *backend) {
 
   allocator_t *alloc = backend->backend_alloc;
   alloc->dealloc(alloc, backend);
+}
+
+void ttb_open_window(tt_backend_t *backend, ttb_window_settings_t settings) {
+  (void) backend;
+
+  u32 window_flags = 0;
+
+  const char *window_title = settings.title;
+  if (window_title == NULL) {
+    window_title = "Tectonic Engine Example";
+  }
+
+  i32 window_width = settings.width;
+  if (window_width == 0) {
+    window_width = 640;
+  }
+
+  i32 window_height = settings.height;
+  if (window_height == 0) {
+    window_height = 480;
+  }
+
+  if (settings.resizeable) {
+    window_flags |= FLAG_WINDOW_RESIZABLE;
+  }
+
+  if (window_flags != 0) {
+    SetConfigFlags(window_flags);
+  }
+  InitWindow(window_width, window_height, window_title);
+
+  SetTargetFPS(60);
+  SetExitKey(KEY_NULL);
 }
 
 static ttb_keyboard_key_e ttb_key_from_rl(KeyboardKey rl_key);
@@ -79,9 +110,21 @@ i32 ttb_fps(tt_backend_t *backend) {
   return GetFPS();
 }
 
+static i32 rl_mouse_btn_from_ttb(ttb_mouse_button_e mouse_button) {
+  switch (mouse_button) {
+  case TTB_MOUSE_BUTTON_LEFT:
+    return MOUSE_BUTTON_LEFT;
+  case TTB_MOUSE_BUTTON_RIGHT:
+    return MOUSE_BUTTON_RIGHT;
+  case TTB_MOUSE_BUTTON_MIDDLE:
+    return MOUSE_BUTTON_MIDDLE;
+  default:
+    return -1;
+  }
+}
+
 void ttb_events_poll(tt_backend_t *backend) {
   if (WindowShouldClose()) {
-    log_debug("close window event");
     ttb_event_t window_close_event = {
         .event_id = TTB_EVENT_WINDOW_CLOSED,
     };
@@ -113,50 +156,33 @@ void ttb_events_poll(tt_backend_t *backend) {
     }
   }
 
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) ||
-      IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-    ttb_event_t key_pressed_evt = {
-        .event_id = TTB_EVENT_MOUSE_INPUT,
-        .event_data.evt_mouse_input =
-            {
-                .button = TTB_MOUSE_BUTTON_LEFT,
-                .left_button = IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
-                                   ? TTB_KEY_STATE_PRESSED
-                                   : TTB_KEY_STATE_RELEASED,
-            },
-    };
-    deque_push_back(backend->event_queue, key_pressed_evt);
+  bool any_mouse_btn_pressed = false;
+
+  ttb_event_mouse_input_t mouse_input = {TTB_KEY_STATE_NONE};
+  for (u32 i = 0; i < _amount_ttb_mouse_btns; i++) {
+    i32 rl_mouse_btn = rl_mouse_btn_from_ttb(i);
+    if (rl_mouse_btn != -1) {
+      bool pressed = IsMouseButtonPressed(rl_mouse_btn);
+      bool released = IsMouseButtonReleased(rl_mouse_btn);
+
+      if (pressed) {
+        mouse_input.buttons[i] = TTB_KEY_STATE_PRESSED;
+        any_mouse_btn_pressed = true;
+      } else if (released) {
+        mouse_input.buttons[i] = TTB_KEY_STATE_RELEASED;
+        any_mouse_btn_pressed = true;
+      }
+    }
   }
 
-  if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) ||
-      IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
-    ttb_event_t key_pressed_evt = {
-        .event_id = TTB_EVENT_MOUSE_INPUT,
-        .event_data.evt_mouse_input =
-            {
-                .button = TTB_MOUSE_BUTTON_RIGHT,
-                .left_button = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)
-                                   ? TTB_KEY_STATE_PRESSED
-                                   : TTB_KEY_STATE_RELEASED,
-            },
+  if (any_mouse_btn_pressed) {
+    ttb_event_t mouse_button_evt = {
+      .event_id = TTB_EVENT_MOUSE_INPUT,
+      .event_data.evt_mouse_input = mouse_input,
     };
-    deque_push_back(backend->event_queue, key_pressed_evt);
+    deque_push_back(backend->event_queue, mouse_button_evt);
   }
 
-  if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) ||
-      IsMouseButtonReleased(MOUSE_BUTTON_MIDDLE)) {
-    ttb_event_t key_pressed_evt = {
-        .event_id = TTB_EVENT_MOUSE_INPUT,
-        .event_data.evt_mouse_input =
-            {
-                .button = TTB_MOUSE_BUTTON_MIDDLE,
-                .left_button = IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)
-                                   ? TTB_KEY_STATE_PRESSED
-                                   : TTB_KEY_STATE_RELEASED,
-            },
-    };
-    deque_push_back(backend->event_queue, key_pressed_evt);
-  }
 }
 
 static void ttb_camera_copy(Camera2D *rl_cam, const tt_camera_t *cam) {
@@ -169,18 +195,20 @@ static void ttb_camera_copy(Camera2D *rl_cam, const tt_camera_t *cam) {
 }
 
 i32 ttb_screen_to_cam_x(tt_backend_t *backend, i32 x, const tt_camera_t *cam) {
+  (void) backend;
   Camera2D rl_cam;
   ttb_camera_copy(&rl_cam, cam);
   return GetScreenToWorld2D((Vector2){.x = x}, rl_cam).x;
 }
 
 i32 ttb_screen_to_cam_y(tt_backend_t *backend, i32 y, const tt_camera_t *cam) {
+  (void) backend;
   Camera2D rl_cam;
   ttb_camera_copy(&rl_cam, cam);
   return GetScreenToWorld2D((Vector2){.y = y}, rl_cam).y;
 }
 
-f64 ttb_frame_time(tt_backend_t *backend) { return GetFrameTime(); }
+f64 ttb_frame_time(tt_backend_t *backend) { (void) backend; return GetFrameTime(); }
 
 bool ttb_key_down(tt_backend_t *backend, ttb_keyboard_key_e key) {
   (void)backend;
@@ -394,12 +422,6 @@ i32 ttb_screen_height(tt_backend_t *backend) {
   return GetScreenHeight();
 }
 
-bool ttb_camera_make_id(tt_backend_t *backend, u64 *cam_id) {
-  *cam_id = backend->cameras_amount++;
-
-  return true;
-}
-
 void _ttb_cmds_render(tt_backend_t *backend) {
   BeginDrawing();
 
@@ -517,6 +539,11 @@ void _ttb_cmds_render(tt_backend_t *backend) {
 
   backend->render_cmds =
       array_new(ttb_render_cmd_t, &backend->render_cmd_alloc);
+}
+
+bool ttb_camera_make_id(tt_backend_t *backend, u64 *cam_id) {
+  *cam_id = backend->cameras_amount++;
+  return true;
 }
 
 static ttb_keyboard_key_e ttb_key_from_rl(KeyboardKey rl_key) {

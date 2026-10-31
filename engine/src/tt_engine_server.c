@@ -24,11 +24,28 @@ void ttes_deinit(tt_engine_server_t *engine) {
   tt_server_deinit(&engine->server);
 }
 
-bool ttes_update(tt_engine_server_t *engine) { return true; }
+bool ttes_update(tt_engine_server_t *engine) {
+  bool running = false;
+  pthread_rwlock_rdlock(&engine->server.server_lock);
+  running = engine->server.state != TT_SERVER_STOPPED;
+  // TODO: Stop subprocesses
+  pthread_rwlock_unlock(&engine->server.server_lock);
+  return running;
+}
 
 bool ttes_server_host(tt_engine_server_t *engine, const char *ipaddr,
                       u32 port) {
   pthread_rwlock_wrlock(&engine->server.server_lock);
+
+  if (!ttes_subproc_start(engine, TTES_SUBPROC_PACKET_RECV)) {
+    log_error("Failed to start packet receiver on the server");
+    return 1;
+  }
+
+  if (!ttes_subproc_start(engine, TTES_SUBPROC_CLIENT_ACCEPT)) {
+    log_error("Failed to start client acceptor on the server");
+    return 1;
+  }
   engine->server.address = sockets_open_server(ipaddr, port);
   if (engine->server.address == -1) {
     log_error("Failed to open server");
@@ -44,6 +61,12 @@ void ttes_server_stop(tt_engine_server_t *engine) {
   pthread_rwlock_wrlock(&engine->server.server_lock);
   engine->server.address = -1;
   engine->server.state = TT_SERVER_STOPPED;
+
+  for (tt_subproc_id_t i = 0; i < _amount_ttes_subprocesses; i++) {
+    if (engine->subproc_infos[i].running) {
+      ttes_subproc_stop(engine, i);
+    }
+  }
   pthread_rwlock_unlock(&engine->server.server_lock);
 }
 
@@ -54,8 +77,8 @@ void ttes_packet_init(tt_engine_server_t *engine, tt_packet_t *packet,
   packet->packet_id = packet_info.packet_id;
 
   pthread_rwlock_wrlock(&engine->server.server_lock);
-  packet->payload = engine->server.packet_alloc.alloc(
-      &engine->server.packet_alloc, packet_info.payload_size);
+  packet->payload = engine->server.packet_bump.alloc.alloc(
+      &engine->server.packet_bump.alloc, packet_info.payload_size);
   memcpy(packet->payload, payload, packet_info.payload_size);
   pthread_rwlock_unlock(&engine->server.server_lock);
 }
@@ -65,7 +88,7 @@ bool ttes_packet_pop(tt_engine_server_t *engine, tt_packet_t *packet,
   return tt_packet_queue_pop(
       &engine->server.packet_infos, &engine->server.packet_data_queue,
       &engine->server.packet_queue_mutex, packet, packet_ctx,
-      &engine->server.packet_alloc, decode_ctx);
+      &engine->server.packet_bump.alloc, decode_ctx);
 }
 
 // Server rwlock already locked
@@ -73,9 +96,16 @@ static tt_connection_status_e
 tt_server_handle_client_connection(tt_server_t *server, u64 client_id) {
   tt_client_desc_t client_desc = server->connected_clients[client_id];
 
-  return tt_handle_connection(client_desc.address, client_desc.client_id,
-                              &server->packet_queue_mutex,
-                              &server->packet_data_queue);
+  struct tt_connection client_connection = {
+      .client_id = client_id,
+      .recv_addr = client_desc.address,
+      .side = TT_SIDE_SERVER,
+      .connection_packets = &server->packet_infos,
+      .packet_data_queue = &server->packet_data_queue,
+      .packet_queue_mutex = &server->packet_queue_mutex,
+  };
+
+  return tt_handle_connection(&client_connection);
 }
 
 static void *ttes_packet_receiver_run(void *arg) {
@@ -84,24 +114,29 @@ static void *ttes_packet_receiver_run(void *arg) {
   addr_t server_addr = -1;
   tt_server_state_e server_state = TT_SERVER_RUNNING;
 
+  bump_t temp_bump = {0};
+  bump_init(&temp_bump, 4000);
+
   while (server_state == TT_SERVER_RUNNING || server_state == TT_SERVER_OPEN) {
     pthread_rwlock_rdlock(&server->server_lock);
     server_state = server->state;
+    addr_t _server_addr = server->address;
     pthread_rwlock_unlock(&server->server_lock);
 
     switch (server_state) {
     case TT_SERVER_OPEN: {
+      server_addr = _server_addr;
       if (server_addr == -1) {
-        pthread_rwlock_rdlock(&server->server_lock);
-        server_addr = server->address;
+        log_warn("Server open but has no address, stopping");
+        pthread_rwlock_wrlock(&server->server_lock);
+        server->state = TT_SERVER_RUNNING;
         pthread_rwlock_unlock(&server->server_lock);
       }
 
-      pthread_rwlock_rdlock(&server->server_lock);
-
-      // do stuff ...
-      i64 poll_res = sockets_server_poll_clients(
-          server->poll_clients, array_len(server->poll_clients), 100);
+      pthread_mutex_lock(&server->poll_clients_mutex);
+      usz server_poll_clients_len = array_len(server->poll_clients);
+      i64 poll_res = sockets_server_poll_clients(server->poll_clients,
+                                                 server_poll_clients_len, 100);
 
       i32 error = 0;
       if (!sockets_server_valid_poll(poll_res, &error)) {
@@ -111,6 +146,7 @@ static void *ttes_packet_receiver_run(void *arg) {
 
       for (size_t i = 0; i < array_len(server->poll_clients); i++) {
         if (server->poll_clients[i].revents & (POLLIN | POLLRDNORM)) {
+          pthread_rwlock_wrlock(&server->server_lock);
           tt_connection_status_e status =
               tt_server_handle_client_connection(server, i);
           switch (status) {
@@ -119,27 +155,33 @@ static void *ttes_packet_receiver_run(void *arg) {
           } break;
           case TT_CONNECTION_CLOSED: {
             log_info("Client connection closed, stopping");
-            pthread_rwlock_wrlock(&server->server_lock);
             server->state = TT_SERVER_STOPPED;
-            pthread_rwlock_unlock(&server->server_lock);
           } break;
           default: {
           } break;
           }
+          pthread_rwlock_unlock(&server->server_lock);
         }
 
-        if (server->poll_clients[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+        bool client_error =
+            server->poll_clients[i].revents & (POLLERR | POLLHUP | POLLNVAL);
+        if (client_error) {
+          pthread_rwlock_wrlock(&server->server_lock);
           log_error("Client %d disconnected or error\n",
                     server->poll_clients[i].fd);
           sockets_close(server->poll_clients[i].fd);
-          // TODO: You may want to mark the player slot as disconnected
+
+          tt_client_desc_t client_desc = server->connected_clients[i];
+          deque_push_back(server->removed_clients, client_desc);
+
           array_remove(server->poll_clients, i);
           array_remove(server->connected_clients, i);
+          
+          pthread_rwlock_unlock(&server->server_lock);
         }
-        server_addr = server->address;
       }
 
-      pthread_rwlock_unlock(&server->server_lock);
+      pthread_mutex_unlock(&server->poll_clients_mutex);
 
     } break;
     case TT_SERVER_STOPPED: {
@@ -151,7 +193,13 @@ static void *ttes_packet_receiver_run(void *arg) {
       tt_wait(100);
     } break;
     }
+
+    bump_reset(&temp_bump);
   }
+
+  bump_free(&temp_bump);
+
+  log_info("Server stopped receiving packets");
 
   return NULL;
 }
@@ -178,11 +226,13 @@ static void *ttes_client_acceptor_run(void *arg) {
       i32 res = sockets_server_pending_client(server_addr);
       if (res > 0) {
         addr_t client_addr = sockets_server_accept_client(server_addr);
+        pthread_mutex_lock(&server->poll_clients_mutex);
 
         pthread_rwlock_wrlock(&server->server_lock);
+        usz connected_clients = array_len(server->connected_clients);
 
         tt_client_desc_t client_desc = {
-            .client_id = array_len(server->connected_clients),
+            .client_id = connected_clients,
             .address = client_addr,
         };
         poll_client_t poll_client = {
@@ -194,6 +244,8 @@ static void *ttes_client_acceptor_run(void *arg) {
         array_add(server->poll_clients, poll_client);
 
         pthread_rwlock_unlock(&server->server_lock);
+
+        pthread_mutex_unlock(&server->poll_clients_mutex);
       } else if (res < 0) {
         log_error("Error while checking for pending clients");
       }
@@ -209,6 +261,8 @@ static void *ttes_client_acceptor_run(void *arg) {
     } break;
     }
   }
+
+  log_info("Server stopped accepting clients");
 
   return NULL;
 }

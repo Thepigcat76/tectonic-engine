@@ -6,7 +6,6 @@
 #define COMPILER "clang"
 #define STANDARD "c23"
 #define DEBUG true
-#define OUT_NAME "build/tectonic"
 
 #define LIB_LILC "lilc"
 #define LIB_CJSON "cjson"
@@ -18,6 +17,7 @@
 #define LIB_PTHREAD "pthread"
 
 static Cmd cmd = {0};
+static bool builtin_server = false;
 
 static void visit_entry(struct file_entry entry) {
   if (entry.file_ext == NULL || strcmp(entry.file_ext, "c") != 0)
@@ -31,6 +31,9 @@ static void visit_entry(struct file_entry entry) {
   // Compile source file in object mode
   cmd_appendf(&compile_cmd, "-c");
   cmd_appendf(&compile_cmd, "%s", entry.path);
+
+  if (builtin_server)
+    cmd_appendf(&compile_cmd, "-DBUILTIN_SERVER");
 
   // Flags
   cmd_appendf(&compile_cmd, "-std=%s", STANDARD);
@@ -92,14 +95,28 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  bool running = args_contains(argc, argv, "r") != -1;
+  builtin_server = args_contains(argc, argv, "--builtin-server") != -1;
 
-  bool building_static_lib = args_contains(argc, argv, "--static-lib") != -1;
-  bool building_dynamic_lib = args_contains(argc, argv, "--dynamic-lib") != -1;
+  bool running = arg_eq(argc, argv, 1, "r") || arg_eq(argc, argv, 1, "run");
+  bool building = arg_eq(argc, argv, 1, "b") || arg_eq(argc, argv, 1, "build");
+  if (!running) building = true;
 
-  if (running && (building_static_lib || building_dynamic_lib)) {
-    fprintf(stderr, "Cannot build the engine as a library while running\n");
+  if (argc <= 2 && running) {
+    printf("[gurd-error] No run target provided, pass in the directory "
+           "containing the entry point of your game, like: 'gurd run example "
+           "...'\n");
+
     return 1;
+  }
+  const char *target = NULL;
+  if (argc >= 3) {
+    target = argv[2];
+    if (running && strcmp(target, "engine") == 0) {
+      printf("[gurd-error] cannot run 'engine'\n");
+      return 1;
+    }
+  } else if (building) {
+    target = "engine";
   }
 
   int backend_arg_idx =
@@ -113,12 +130,33 @@ int main(int argc, char **argv) {
   // Remove old build files
   remove_dir_recursive("build", false);
 
+  if (backend != NULL) {
+    char path[256];
+    sprintf(path, "backends/%s/", backend);
+
+    walk_dir(path, visit_entry);
+  } else {
+    printf("[gurd-error]: No backend provided, specify one by passing "
+           "--backend=... to gurd\n");
+    return 1;
+  }
+
   // Compile src files (cached)
-  walk_dir("src", visit_entry);
   walk_dir("vendor", visit_entry);
 
   if (running) {
-    walk_dir("example", visit_entry);
+    if (target == NULL) {
+      printf("[gurd-error] no target provided for running, specify a target "
+             "after 'gurd run <example>'\n");
+      return 1;
+    }
+    walk_dir("engine", visit_entry);
+    walk_dir(target, visit_entry);
+  } else if (building) {
+    if (strcmp(target, "engine") != 0) {
+      walk_dir("engine", visit_entry);
+    }
+    walk_dir(target, visit_entry);
   }
 
   // Link obj files to binary
@@ -130,16 +168,9 @@ int main(int argc, char **argv) {
   cmd_appendf(&cmd, "-l" LIB_LILC);
   cmd_appendf(&cmd, "-l" LIB_CJSON);
 
-  if (DEBUG)  {
+  if (DEBUG) {
     cmd_appendf(&cmd, "-rdynamic");
   }
-
-  //printf("Adding modules\n");
-
-  // Modules
-  //module_add(str_fmt_temp("%s/coding/c/lilc", home));
-
-  //printf("Done adding modules\n");
 
   if (backend != NULL && strcmp(backend, "raylib") == 0) {
     cmd_appendf(&cmd, "-l%s", LIB_RAYLIB);
@@ -150,18 +181,15 @@ int main(int argc, char **argv) {
     cmd_appendf(&cmd, "-l%s", LIB_PTHREAD);
   }
 
+  const char *out_name = strcmp(target, "engine") == 0 ? "tectonic" : target;
+
   cmd_appendf(&cmd, "-o");
-  cmd_appendf(&cmd, OUT_NAME);
+  cmd_appendf(&cmd, "build/%s-bin", out_name);
   cmd_appendf(&cmd, "-fsanitize=thread");
   cmd_appendf(&cmd, "-pthread");
 
-  char s[1024];
-  cmd_sprint(&cmd, s);
-
   // Run the command
   cmd_execute(&cmd);
-
-  printf("Comamnd: %s\n", s);
 
   bool debug = args_contains(argc, argv, "-d") != -1;
 
@@ -181,12 +209,15 @@ int main(int argc, char **argv) {
     }
 
     char exec_cmd[1024];
-    sprintf(exec_cmd, "./%s", OUT_NAME);
+    sprintf(exec_cmd, "./build/%s-bin", out_name);
 
     if (debug) {
-      sprintf(exec_cmd, "gdb --args ./%s", OUT_NAME);
+      sprintf(exec_cmd, "gdb --args ./build/%s-bin", out_name);
     } else if (args_contains(argc, argv, "-vg") != -1) {
-      sprintf(exec_cmd, "valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --errors-for-leak-kinds=all ./%s", OUT_NAME);
+      sprintf(exec_cmd,
+              "valgrind --leak-check=full --show-leak-kinds=all "
+              "--track-origins=yes --errors-for-leak-kinds=all ./build/%s-bin",
+              out_name);
     }
 
     return WEXITSTATUS(systemf("%s %s", exec_cmd, args));

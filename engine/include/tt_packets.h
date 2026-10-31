@@ -43,6 +43,7 @@ typedef void (*tt_packet_decode_func_t)(tt_packet_t *, tt_byte_buf_t *, void *);
 
 typedef struct tt_packet_info {
   tt_packet_id_t packet_id;
+  char *packet_name;
   tt_packet_encode_func_t encode_func;
   tt_packet_decode_func_t decode_func;
   tt_packet_dir_e packet_dir;
@@ -67,8 +68,6 @@ struct tt_packet_queue_entry {
 typedef deque_t(struct tt_packet_queue_entry) tt_packet_queue_t;
 
 void tt_packet_queue_log(const tt_packet_queue_t *packet_queue);
-
-// TODO: Check packet dir
 
 void tt_encode_packet(const tt_packet_t *packet, tt_packet_info_t info,
                       tt_byte_buf_t *buf, void *encode_ctx);

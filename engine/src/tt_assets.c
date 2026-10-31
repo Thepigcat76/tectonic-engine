@@ -2,7 +2,7 @@
 #include "../include/tt_backend.h"
 #include "../include/tt_shared.h"
 #include "../include/tt_toml.h"
-#include "../vendor/toml.h"
+#include "../../vendor/toml.h"
 #include "lilc/alloc.h"
 #include "lilc/array.h"
 #include "lilc/dir.h"
@@ -19,26 +19,31 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-static inline void tt_asset_manager_init(tt_asset_manager_t *asset_manager) {
-  bump_init(&asset_manager->asset_bump, 128000);
-  bump_allocator_init(&asset_manager->asset_allocator,
-                      &asset_manager->asset_bump);
+static inline void tt_asset_manager_init(tt_asset_manager_t *assets) {
+  bump_init(&assets->asset_bump, 128000);
 
-  asset_manager->musics =
-      array_new(tt_asset_music_t, &asset_manager->asset_allocator);
-  asset_manager->shaders =
-      array_new(tt_asset_shader_t, &asset_manager->asset_allocator);
-  asset_manager->sounds =
-      array_new(tt_asset_sound_t, &asset_manager->asset_allocator);
-  asset_manager->textures =
-      array_new(tt_asset_texture_t, &asset_manager->asset_allocator);
+  assets->musics = array_new(tt_asset_music_t, &assets->asset_bump.alloc);
+  assets->shaders = array_new(tt_asset_shader_t, &assets->asset_bump.alloc);
+  assets->sounds = array_new(tt_asset_sound_t, &assets->asset_bump.alloc);
+  assets->textures = array_new(tt_asset_texture_t, &assets->asset_bump.alloc);
 
-  bump_init(&asset_manager->asset_handle_bump, 16000);
-  bump_allocator_init(&asset_manager->asset_handle_allocator,
-                      &asset_manager->asset_handle_bump);
+  bump_init(&assets->asset_handle_bump, 16000);
 
-  asset_manager->asset_handles =
-      array_new(tt_asset_handle_t, &asset_manager->asset_handle_allocator);
+  assets->asset_handles =
+      array_new(tt_asset_handle_t, &assets->asset_handle_bump.alloc);
+  if (assets->asset_paths == NULL) {
+    assets->asset_paths = array_new_capacity(char *, 16, &HEAP_ALLOCATOR);
+  }
+}
+
+void tt_assets_add_asset_path(tt_asset_manager_t *assets,
+                              const char *asset_path) {
+  if (assets->asset_paths == NULL) {
+    assets->asset_paths = array_new_capacity(char *, 16, &HEAP_ALLOCATOR);
+  }
+  char *path_cpy = str_dup(asset_path, &HEAP_ALLOCATOR);
+
+  array_add(assets->asset_paths, path_cpy);
 }
 
 struct file_entry {
@@ -310,14 +315,14 @@ static bool tt_texture_meta_load(tt_texture_meta_t *meta,
 static void tt_asset_visit(tt_asset_manager_t *assets, hashset_t *visited_files,
                            struct file_entry entry) {
   dyn_string_t file_path_cpy = {0};
-  dyn_string_init(&file_path_cpy, &assets->asset_allocator);
+  dyn_string_init(&file_path_cpy, &assets->asset_bump.alloc);
   dyn_string_copy(&file_path_cpy, &entry.path);
 
   hashset_insert(visited_files, &file_path_cpy.string);
 
   if (str_eq(entry.file_ext, "png")) {
     void *tex_data =
-        ttb_asset_load(assets->backend, &assets->asset_allocator,
+        ttb_asset_load(assets->backend, &assets->asset_bump.alloc,
                        TT_ASSET_TEXTURE, file_path_cpy.string, NULL);
 
     dyn_string_t meta_file_path = {0};
@@ -332,15 +337,14 @@ static void tt_asset_visit(tt_asset_manager_t *assets, hashset_t *visited_files,
 
     tt_texture_meta_t meta = {0};
     if (file_exists(meta_file_path.string)) {
-      tt_texture_meta_load(&meta, &meta_file_path, &assets->asset_allocator);
+      tt_texture_meta_load(&meta, &meta_file_path, &assets->asset_bump.alloc);
       log_info("Loaded meta file for texture '%s'", entry.path.string);
     }
 
     dyn_string_free(&meta_file_path);
 
     tt_asset_texture_t asset_tex = {
-        .meta = assets->asset_allocator.alloc(&assets->asset_allocator,
-                                              sizeof(tt_texture_meta_t)),
+        .meta = bump_alloc(&assets->asset_bump, sizeof(tt_texture_meta_t)),
         .tex_data = tex_data,
         .path = file_path_cpy,
     };
@@ -365,7 +369,7 @@ static void tt_asset_visit(tt_asset_manager_t *assets, hashset_t *visited_files,
     }
 
     void *shader_data =
-        ttb_asset_load(assets->backend, &assets->asset_allocator,
+        ttb_asset_load(assets->backend, &assets->asset_bump.alloc,
                        TT_ASSET_SHADER, file_path_cpy.string, prev_shader_data);
 
     tt_asset_shader_t asset_shader = {
@@ -391,17 +395,17 @@ static void tt_asset_rebind(tt_asset_manager_t *assets, dyn_string_t asset_path,
   asset_handle->path = asset_path;
 
   dyn_string_t asset_path_cpy = {0};
-  dyn_string_init(&asset_path_cpy, &assets->asset_handle_allocator);
+  dyn_string_init(&asset_path_cpy, &assets->asset_handle_bump.alloc);
 
   switch ((tt_asset_category_t)asset_handle->asset_category) {
   case TT_ASSET_TEXTURE: {
+    dyn_string_copy(&asset_path_cpy, &asset_path);
+    file_path_resolve(&asset_path_cpy);
+
     bool found_tex = false;
     tt_asset_texture_t *tex;
-    array_foreach(assets->textures, tex) {
-      dyn_string_printf(&asset_path_cpy, "%s/%s", assets->assets_path,
-                        asset_path.string);
-      file_path_resolve(&asset_path_cpy);
 
+    array_foreach(assets->textures, tex) {
       if (str_eq(asset_path_cpy.string, tex->path.string)) {
         asset_handle->asset = tex;
         found_tex = true;
@@ -409,7 +413,7 @@ static void tt_asset_rebind(tt_asset_manager_t *assets, dyn_string_t asset_path,
       }
     }
     if (!found_tex) {
-      log_error("[ASSETS] Missing texture for %s", asset_path.string);
+      log_error("[ASSETS] Missing texture for %s", asset_path_cpy.string);
       asset_handle->asset = tt_asset_by_id(assets, missing_tex);
     }
   } break;
@@ -451,38 +455,41 @@ void tt_assets_load(tt_asset_manager_t *assets) {
   if (initialize)
     tt_asset_manager_init(assets);
 
-  if (assets->assets_path == NULL) {
-    log_error("[ASSETS] No asset path provided");
+  if (array_len(assets->asset_paths) == 0) {
+    log_error("[ASSETS] No asset paths provided");
     return;
   }
 
-  dyn_string_t assets_path = {0};
-  dyn_string_init(&assets_path, &HEAP_ALLOCATOR);
-  dyn_string_copy_str(&assets_path, assets->assets_path);
-  file_path_resolve(&assets_path);
+  char **asset_path;
+  array_foreach(assets->asset_paths, asset_path) {
+    dyn_string_t assets_path = {0};
+    dyn_string_init(&assets_path, &HEAP_ALLOCATOR);
+    dyn_string_copy_str(&assets_path, *asset_path);
+    file_path_resolve(&assets_path);
 
-  if (!dir_exists(assets_path.string)) {
-    log_error("[ASSETS] Failed to find assets directory");
-    return;
+    if (!dir_exists(assets_path.string)) {
+      log_error("[ASSETS] Failed to find assets directory");
+      dyn_string_free(&assets_path);
+      return;
+    }
+
+    hashset_t visited_files = {0};
+    hashset_init(&visited_files, &assets->asset_bump.alloc, char *,
+                 str_ptrv_hash, str_ptrv_eq);
+
+    tt_walk_assets_dir(assets, assets_path, &visited_files, tt_asset_visit);
+
     dyn_string_free(&assets_path);
   }
 
-  hashset_t visited_files = {0};
-  hashset_init(&visited_files, &assets->asset_allocator, char *, str_ptrv_hash,
-               str_ptrv_eq);
-
-  tt_walk_assets_dir(assets, assets_path, &visited_files, tt_asset_visit);
-
   if (initialize) {
-    none_tex = tt_asset_bind(assets, NULL);
-    missing_tex = tt_asset_bind(assets, "tex/errtex.png");
+    missing_tex = tt_asset_bind(assets, "engine/res/tex/errtex.png");
   } else {
     tt_asset_handle_t *asset_handle;
     array_foreach(assets->asset_handles, asset_handle) {
       tt_asset_rebind(assets, asset_handle->path, asset_handle);
     }
   }
-  dyn_string_free(&assets_path);
 }
 
 static inline void tt_assets_deinit(tt_asset_manager_t *asset_manager) {
@@ -492,6 +499,13 @@ static inline void tt_assets_deinit(tt_asset_manager_t *asset_manager) {
 
   bump_free(&asset_manager->asset_bump);
   bump_free(&asset_manager->asset_handle_bump);
+
+  char **asset_path;
+  array_foreach(asset_manager->asset_paths, asset_path) {
+    heap_dealloc(*asset_path);
+  }
+
+  array_free(asset_manager->asset_paths);
 }
 
 void tt_assets_unload(tt_asset_manager_t *assets, bool deinit) {
@@ -520,7 +534,7 @@ tt_asset_id_t tt_asset_bind(tt_asset_manager_t *assets,
   bool none = false;
 
   if (asset_path_fmt != NULL) {
-    dyn_string_init(&file_path, &assets->asset_handle_allocator);
+    dyn_string_init(&file_path, &assets->asset_handle_bump.alloc);
 
     va_list args;
     va_start(args, asset_path_fmt);

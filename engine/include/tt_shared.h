@@ -47,9 +47,11 @@ typedef enum tt_asset_category {
 
 typedef struct tt_asset_manager tt_asset_manager_t;
 
-typedef struct tt_entity_manager tt_entity_manager_t;
-
 #define TT_COLOR_WHITE (color_make(255, 255, 255, 255))
 #define TT_COLOR_BLACK (color_make(0, 0, 0, 255))
+
+#define TT_COLOR_BLUE (color_make(62, 43, 229, 255))
+#define TT_COLOR_GREEN (color_make(59, 234, 45, 255))
+#define TT_COLOR_RED (color_make(213, 43, 65, 255))
 
 void tt_wait(i32 millis);

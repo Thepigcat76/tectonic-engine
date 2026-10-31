@@ -1,7 +1,7 @@
 #include "../include/tt_ui.h"
 #include "../include/tt_assets.h"
 #include "../include/tt_backend.h"
-#include "lilc/alloc.h"
+#include "lilc/bump.h"
 #include "lilc/log.h"
 #include <raylib.h>
 
@@ -12,7 +12,11 @@ void ttui_set_config(tt_asset_manager_t *assets, ttui_config_t config) {
   ttui_config = config;
 }
 
-void ttui_set_config_default(tt_asset_manager_t *assets) {
+void ttui_set_config_default(tt_asset_manager_t *assets, const char *tex_path) {
+  if (tex_path == NULL) {
+    tex_path = "engine/res/tex/";
+  }
+
   static bool default_config_loaded = false;
   static ttui_config_t default_config = {0};
 
@@ -23,15 +27,15 @@ void ttui_set_config_default(tt_asset_manager_t *assets) {
     default_config.text_default_size = 16;
 
     default_config.textbox_bg_tex =
-        tt_asset_bind(assets, "engine/tex/textbox_bg.png");
+        tt_asset_bind(assets, "%s/textbox_bg.png", tex_path);
     default_config.textbox_selected_bg_tex =
-        tt_asset_bind(assets, "engine/tex/textbox_selected_bg.png");
+        tt_asset_bind(assets, "%s/textbox_selected_bg.png", tex_path);
     default_config.button_bg_tex =
-        tt_asset_bind(assets, "engine/tex/button_bg.png");
+        tt_asset_bind(assets, "%s/button_bg.png", tex_path);
     default_config.button_selected_bg_tex =
-        tt_asset_bind(assets, "engine/tex/button_selected_bg.png");
+        tt_asset_bind(assets, "%s/button_selected_bg.png", tex_path);
     default_config.label_bg_tex =
-        tt_asset_bind(assets, "engine/tex/label_bg.png");
+        tt_asset_bind(assets, "%s/label_bg.png", tex_path);
   }
 
   ttui_config = default_config;
@@ -66,8 +70,7 @@ static void ttui_layout_init(ttui_layout_t *layout) {
 
   if (layout->elem_bump.first_node == NULL) {
     bump_init(&layout->elem_bump, 16000);
-    bump_allocator_init(&layout->elem_alloc, &layout->elem_bump);
-    deque_init(layout->ui_elements, &layout->elem_alloc);
+    deque_init(layout->ui_elements, &layout->elem_bump.alloc);
   }
 }
 
@@ -80,7 +83,7 @@ void ttui_layout_finish(tt_backend_t *backend, ttui_layout_t *layout) {
 
   if (layout->render) {
     bump_reset(&layout->elem_bump);
-    deque_init(layout->ui_elements, &layout->elem_alloc);
+    deque_init(layout->ui_elements, &layout->elem_bump.alloc);
     layout->container_width = 0;
     layout->container_height = 0;
     layout->max_width = 0;
@@ -135,47 +138,49 @@ void ttui_layout_finish(tt_backend_t *backend, ttui_layout_t *layout) {
       }
     }
 
-    ttb_render(backend, (ttb_render_cmd_t){.cmd_id = TTB_RENDER_CMD_RECTANGLE,
-                                           .cmd_data.cmd_rect = {
-                                               .outline_only = true,
-                                               .color = TT_COLOR_BLACK,
-                                               .rectangle =
-                                                   {
-                                                       .x = layout->x,
-                                                       .y = layout->y,
-                                                       .width = layout->width,
-                                                       .height = layout->height,
-                                                   },
-                                           }});
-    ttb_render(
-        backend,
-        (ttb_render_cmd_t){.cmd_id = TTB_RENDER_CMD_RECTANGLE,
-                           .cmd_data.cmd_rect = {
-                               .outline_only = false,
-                               .color = TT_COLOR_BLACK,
-                               .rectangle =
-                                   {
-                                       .x = layout->x + (layout->width - 4) / 2,
-                                       .y = layout->y,
-                                       .width = 4,
-                                       .height = layout->height,
-                                   },
-                           }});
-    ttb_render(backend,
-               (ttb_render_cmd_t){
-                   .cmd_id = TTB_RENDER_CMD_RECTANGLE,
-                   .cmd_data.cmd_rect = {
-                       .outline_only = false,
-                       .color = TT_COLOR_BLACK,
-                       .rectangle =
-                           {
-                               .x = layout->x,
-                               .y = layout->y + (layout->height - 4) / 2,
-                               .width = layout->width,
-                               .height = 4,
-                           },
-                   }});
-
+    if (layout->debug) {
+      ttb_render(backend,
+                 (ttb_render_cmd_t){.cmd_id = TTB_RENDER_CMD_RECTANGLE,
+                                    .cmd_data.cmd_rect = {
+                                        .outline_only = true,
+                                        .color = TT_COLOR_BLACK,
+                                        .rectangle =
+                                            {
+                                                .x = layout->x,
+                                                .y = layout->y,
+                                                .width = layout->width,
+                                                .height = layout->height,
+                                            },
+                                    }});
+      ttb_render(backend,
+                 (ttb_render_cmd_t){
+                     .cmd_id = TTB_RENDER_CMD_RECTANGLE,
+                     .cmd_data.cmd_rect = {
+                         .outline_only = false,
+                         .color = TT_COLOR_BLACK,
+                         .rectangle =
+                             {
+                                 .x = layout->x + (layout->width - 4) / 2,
+                                 .y = layout->y,
+                                 .width = 4,
+                                 .height = layout->height,
+                             },
+                     }});
+      ttb_render(backend,
+                 (ttb_render_cmd_t){
+                     .cmd_id = TTB_RENDER_CMD_RECTANGLE,
+                     .cmd_data.cmd_rect = {
+                         .outline_only = false,
+                         .color = TT_COLOR_BLACK,
+                         .rectangle =
+                             {
+                                 .x = layout->x,
+                                 .y = layout->y + (layout->height - 4) / 2,
+                                 .width = layout->width,
+                                 .height = 4,
+                             },
+                     }});
+    }
   }
 }
 
@@ -288,27 +293,29 @@ bool ttui_button(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text,
 }
 
 static void ttui_label_render(tt_backend_t *backend, ttui_text_t text,
-                              ttui_elem_t elem) {
+                              ttui_elem_t elem, bool background) {
   if (text.text_color == 0) {
     text.text_color = ttui_config.text_default_color;
   }
   if (text.text_size == 0) {
     text.text_size = ttui_config.text_default_size;
   }
-  ttb_render_cmd_t bg_cmd = {.cmd_id = TTB_RENDER_CMD_TEXTURE,
-                             .cmd_data.cmd_tex = {
-                                 .texture = ttui_config.label_bg_tex,
-                                 .tint_color = TT_COLOR_WHITE,
-                                 .atlas_src.x = 0,
-                                 .atlas_src.y = 0,
-                                 .atlas_src.width = elem.width,
-                                 .atlas_src.height = elem.height,
-                                 .dest.x = elem.x,
-                                 .dest.y = elem.y,
-                                 .dest.width = elem.width,
-                                 .dest.height = elem.height,
-                             }};
-  ttb_render(backend, bg_cmd);
+  if (background) {
+    ttb_render_cmd_t bg_cmd = {.cmd_id = TTB_RENDER_CMD_TEXTURE,
+                               .cmd_data.cmd_tex = {
+                                   .texture = ttui_config.label_bg_tex,
+                                   .tint_color = TT_COLOR_WHITE,
+                                   .atlas_src.x = 0,
+                                   .atlas_src.y = 0,
+                                   .atlas_src.width = elem.width,
+                                   .atlas_src.height = elem.height,
+                                   .dest.x = elem.x,
+                                   .dest.y = elem.y,
+                                   .dest.width = elem.width,
+                                   .dest.height = elem.height,
+                               }};
+    ttb_render(backend, bg_cmd);
+  }
 
   u32 text_width = ttb_text_width(backend, text.text, text.text_size);
 
@@ -326,7 +333,7 @@ static void ttui_label_render(tt_backend_t *backend, ttui_text_t text,
 }
 
 void ttui_label(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text,
-                i32 x, i32 y, i32 width, i32 height) {
+                i32 x, i32 y, i32 width, i32 height, bool background) {
   ttui_elem_t elem = {
       .kind = TTUI_LABEL,
       .x = 0,
@@ -346,7 +353,7 @@ void ttui_label(tt_backend_t *backend, ttui_layout_t *layout, ttui_text_t text,
     elem.y = y;
   }
 
-  ttui_label_render(backend, text, elem);
+  ttui_label_render(backend, text, elem, background);
 }
 
 void ttui_text_box(tt_backend_t *backend, ttui_layout_t *layout,

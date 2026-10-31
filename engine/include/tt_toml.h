@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../vendor/toml.h"
+#include "../../vendor/toml.h"
 
 typedef void (*tt_handle_toml_entry_t)(const char *key,
                                        const toml_datum_t *entry, void *args);

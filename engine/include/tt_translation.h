@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lilc/hashmap.h"
+#include "lilc/bump.h"
 
 /* char * -> char * */
 typedef hashmap_t tt_translations_t;
@@ -11,7 +12,6 @@ typedef struct tt_translation_manager {
   hashmap_t translations; /* char * -> tt_translations_t */
 
   bump_t translation_bump;
-  allocator_t translation_alloc;
 } tt_translation_manager_t;
 
 void tt_translation_manager_init(tt_translation_manager_t *manager,

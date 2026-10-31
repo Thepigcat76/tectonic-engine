@@ -1,6 +1,6 @@
 #include "../include/tt_translation.h"
 #include "../include/tt_toml.h"
-#include "../vendor/toml.h"
+#include "../../vendor/toml.h"
 #include "lilc/alloc.h"
 #include "lilc/dynstr.h"
 #include "lilc/eq.h"
@@ -20,7 +20,6 @@ void tt_translation_manager_init(tt_translation_manager_t *manager,
                str_ptrv_hash, str_ptrv_eq, NULL);
 
   bump_init(&manager->translation_bump, 128000);
-  bump_allocator_init(&manager->translation_alloc, &manager->translation_bump);
 }
 
 void tt_translation_manager_deinit(tt_translation_manager_t *manager) {
@@ -62,14 +61,14 @@ void tt_translation_load(tt_translation_manager_t *manager, char *locale,
   }
 
   tt_translations_t translations = {0};
-  hashmap_init(&translations, &manager->translation_alloc, char *, char *,
+  hashmap_init(&translations, &manager->translation_bump.alloc, char *, char *,
                str_ptrv_hash, str_ptrv_eq, NULL);
 
   const toml_datum_t *tab = &res.toptab;
 
   struct tt_toml_translation_args args = {
       .translations = &translations,
-      .translation_alloc = &manager->translation_alloc,
+      .translation_alloc = &manager->translation_bump.alloc,
   };
 
   tt_toml_table_visit_entries(NULL, tab, tt_translation_entry_visit, &args, false);
@@ -79,7 +78,7 @@ void tt_translation_load(tt_translation_manager_t *manager, char *locale,
     i32 key_len = tab->u.tab.len[ientry];
     const toml_datum_t *val = &tab->u.tab.value[ientry];
 
-    key = str_dup_len(key, key_len, &manager->translation_alloc);
+    key = str_dup_len(key, key_len, &manager->translation_bump.alloc);
 
     if (val->type != TOML_STRING) {
       log_warn(
@@ -91,7 +90,7 @@ void tt_translation_load(tt_translation_manager_t *manager, char *locale,
     const char *translation_val = val->u.str.ptr;
     usz val_len = val->u.str.len;
     translation_val =
-        str_dup_len(translation_val, val_len, &manager->translation_alloc);
+        str_dup_len(translation_val, val_len, &manager->translation_bump.alloc);
 
     hashmap_insert(&translations, &key, &translation_val);
   }
@@ -153,7 +152,7 @@ void tt_translation_insert(tt_translation_manager_t *manager, char *locale,
   bool new_map = false;
   if (translations == NULL) {
     tt_translations_t translations0 = {0};
-    hashmap_init(&translations0, &manager->translation_alloc, char *, char *,
+    hashmap_init(&translations0, &manager->translation_bump.alloc, char *, char *,
                  str_ptrv_hash, str_ptrv_eq, NULL);
     translations = &translations0;
     new_map = true;
